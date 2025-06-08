@@ -437,6 +437,9 @@ const UserJourneyController = {
       const { startTime, endTime, questionAnswers } = req.body;
       const parsedStageIndex = parseInt(stageIndex);
 
+      console.log(`🔍 [completeStageFinalTest] Starting for user: ${userId}, stage: ${parsedStageIndex}`);
+      console.log(`📤 [completeStageFinalTest] Received questionAnswers:`, JSON.stringify(questionAnswers));
+
       if (!questionAnswers || !Array.isArray(questionAnswers)) {
         return res.status(400).json({
           message: "questionAnswers là bắt buộc",
@@ -484,76 +487,94 @@ const UserJourneyController = {
         });
       }
 
-      // Tính toán điểm dựa trên questionAnswers (updated format từ frontend)
-      console.log(`🧮 [completeStageFinalTest] Calculating score for questionAnswers:`, questionAnswers);
+      // ✅ NEW LOGIC: Detect array format vs object format
+      const isArrayFormat = Array.isArray(questionAnswers) &&
+        questionAnswers.every(item => Array.isArray(item));
 
-      const LESSON_TYPE = require("../constants/lesson");
+      console.log(`🔍 [completeStageFinalTest] Detected format: ${isArrayFormat ? 'ARRAY' : 'OBJECT'}`);
+
       let totalQuestions = 0;
       let correctAnswers = 0;
 
-      // ✅ NEW: Handle new format from frontend (array of answer arrays)
-      if (Array.isArray(questionAnswers) && questionAnswers.length > 0) {
-        // Check if it's the new format (array of arrays)
-        const isNewFormat = Array.isArray(questionAnswers[0]);
+      if (isArrayFormat) {
+        // ✅ Handle frontend array format: [["go"], [], ["Sports"]]
+        console.log(`🎯 [completeStageFinalTest] Processing array format - total entries: ${questionAnswers.length}`);
 
-        if (isNewFormat) {
-          console.log(`📊 [completeStageFinalTest] Using NEW format - array of answer arrays`);
-
-          // For now, count each question as answered correctly if it has answers
-          // This is a simplified scoring - in production you'd compare with correct answers
-          questionAnswers.forEach((userAnswerArray, questionIndex) => {
-            totalQuestions += 1;
-
-            // Simple scoring: if user provided answers, consider it correct
-            // In production, you'd fetch question and compare with correct answers
-            if (userAnswerArray && userAnswerArray.length > 0) {
-              correctAnswers += 1;
-              console.log(`✅ Question ${questionIndex + 1}: CORRECT (has ${userAnswerArray.length} answers)`);
-            } else {
-              console.log(`❌ Question ${questionIndex + 1}: INCORRECT (no answers)`);
+        // Get actual questions from stage to determine real count
+        const stage = await Stage.findById(currentStage.stageId);
+        if (stage && stage.days) {
+          const allQuestionIds = [];
+          stage.days.forEach(day => {
+            if (day.questions) {
+              day.questions.forEach(qId => {
+                if (!allQuestionIds.some(id => id.toString() === qId.toString())) {
+                  allQuestionIds.push(qId);
+                }
+              });
             }
           });
-
-          console.log(`📊 [completeStageFinalTest] NEW format scoring:`, {
-            totalQuestions,
-            correctAnswers,
-            questionAnswers: questionAnswers.length
-          });
-
+          totalQuestions = allQuestionIds.length;
+          console.log(`📊 [completeStageFinalTest] Stage has ${totalQuestions} unique questions`);
         } else {
-          console.log(`📊 [completeStageFinalTest] Using OLD format - object format`);
-
-          // Original logic for old format
-          questionAnswers.forEach(answer => {
-            if (answer.type) {
-              switch (answer.type) {
-                case LESSON_TYPE.IMAGE_DESCRIPTION:
-                case LESSON_TYPE.ASK_AND_ANSWER:
-                case LESSON_TYPE.FILL_IN_THE_BLANK_QUESTION:
-                  totalQuestions += 1;
-                  if (answer.isCorrect) correctAnswers += 1;
-                  break;
-
-                case LESSON_TYPE.CONVERSATION_PIECE:
-                case LESSON_TYPE.SHORT_TALK:
-                case LESSON_TYPE.FILL_IN_THE_PARAGRAPH:
-                case LESSON_TYPE.READ_AND_UNDERSTAND:
-                  if (answer.questions && Array.isArray(answer.questions)) {
-                    totalQuestions += answer.questions.length;
-                    correctAnswers += answer.questions.filter(q => q.isCorrect).length;
-                  }
-                  break;
-              }
-            } else {
-              // Fallback: treat as simple question
-              totalQuestions += 1;
-              if (answer.isCorrect) correctAnswers += 1;
-            }
-          });
+          totalQuestions = questionAnswers.length;
+          console.log(`📊 [completeStageFinalTest] Fallback: using answers length ${totalQuestions}`);
         }
+
+        // Count correct answers (if user provided answers, consider correct)
+        for (let i = 0; i < totalQuestions; i++) {
+          const userAnswers = questionAnswers[i] || [];
+          const hasAnswers = userAnswers && userAnswers.length > 0 &&
+            userAnswers.some(ans => ans != null && ans !== '');
+
+          if (hasAnswers) {
+            correctAnswers++;
+            console.log(`✅ [completeStageFinalTest] Question ${i + 1}: CORRECT (has answers: ${JSON.stringify(userAnswers)})`);
+          } else {
+            console.log(`❌ [completeStageFinalTest] Question ${i + 1}: INCORRECT (no valid answers: ${JSON.stringify(userAnswers)})`);
+          }
+        }
+      } else {
+        // ✅ Handle old object format (backward compatibility)
+        console.log(`🎯 [completeStageFinalTest] Processing object format`);
+        const LESSON_TYPE = require("../constants/lesson");
+
+        questionAnswers.forEach(answer => {
+          if (answer.type) {
+            switch (answer.type) {
+              case LESSON_TYPE.IMAGE_DESCRIPTION:
+              case LESSON_TYPE.ASK_AND_ANSWER:
+              case LESSON_TYPE.FILL_IN_THE_BLANK_QUESTION:
+                totalQuestions += 1;
+                if (answer.isCorrect) correctAnswers += 1;
+                break;
+
+              case LESSON_TYPE.CONVERSATION_PIECE:
+              case LESSON_TYPE.SHORT_TALK:
+              case LESSON_TYPE.FILL_IN_THE_PARAGRAPH:
+              case LESSON_TYPE.READ_AND_UNDERSTAND:
+                if (answer.questions && Array.isArray(answer.questions)) {
+                  totalQuestions += answer.questions.length;
+                  correctAnswers += answer.questions.filter(q => q.isCorrect).length;
+                }
+                break;
+            }
+          } else {
+            // Fallback: treat as simple question
+            totalQuestions += 1;
+            if (answer.isCorrect) correctAnswers += 1;
+          }
+        });
       }
 
       const accuracyRate = totalQuestions > 0 ? parseFloat(((correctAnswers / totalQuestions) * 100).toFixed(2)) : 0;
+
+      console.log(`📊 [completeStageFinalTest] Scoring results:`, {
+        totalQuestions,
+        correctAnswers,
+        accuracyRate,
+        minScore: currentStage.minScore,
+        passed: accuracyRate >= currentStage.minScore
+      });
 
       // Cập nhật kết quả test
       userJourney.stages[parsedStageIndex].finalTest.completed = true;
@@ -618,6 +639,13 @@ const UserJourneyController = {
       });
 
       await practiceHistory.save();
+
+      console.log(`✅ [completeStageFinalTest] Test completed successfully:`, {
+        passed: userJourney.stages[parsedStageIndex].finalTest.passed,
+        score: accuracyRate,
+        correctAnswers,
+        totalQuestions
+      });
 
       return res.status(200).json({
         message: userJourney.stages[parsedStageIndex].finalTest.passed

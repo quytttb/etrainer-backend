@@ -3,24 +3,16 @@
      "builds": [
           {
                "src": "src/main.js",
-               "use": "@vercel/node"
+               "use": "@vercel/node",
+               "config": {
+                    "maxLambdaSize": "50mb"
+               }
           }
      ],
      "routes": [
           {
                "src": "/(.*)",
-               "dest": "src/main.js",
-               "methods": [
-                    "GET",
-                    "POST",
-                    "PUT",
-                    "PATCH",
-                    "DELETE",
-                    "OPTIONS"
-               ]
+               "dest": "src/main.js"
           }
-     ],
-     "env": {
-          "NODE_ENV": "production"
-     }
+     ]
 }
