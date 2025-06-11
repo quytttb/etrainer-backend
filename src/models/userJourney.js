@@ -40,6 +40,14 @@ const userJourneySchema = new Schema(
               type: Date,
               default: null,
             },
+            completedAt: {
+              type: Date,
+              default: null,
+            },
+            score: {
+              type: Number,
+              default: null,
+            },
             questions: [
               {
                 type: Schema.Types.ObjectId,
@@ -103,7 +111,7 @@ const userJourneySchema = new Schema(
     },
     state: {
       type: String,
-      enum: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "SKIPPED"],
+      enum: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "SKIPPED", "REPLACED"],
       default: "NOT_STARTED",
     },
     startedAt: {
@@ -111,6 +119,10 @@ const userJourneySchema = new Schema(
       default: Date.now,
     },
     completedAt: {
+      type: Date,
+      default: null,
+    },
+    replacedAt: {
       type: Date,
       default: null,
     },

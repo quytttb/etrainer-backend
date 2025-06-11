@@ -3,11 +3,12 @@ const { Schema, model } = require("mongoose");
 const favoriteQuestionSchema = new Schema(
   {
     userId: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "users",
       required: true,
     },
     questionId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       ref: "questions",
       required: true,
     },

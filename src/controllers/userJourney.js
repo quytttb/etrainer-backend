@@ -14,22 +14,29 @@ const UserJourneyController = {
         });
       }
 
+      // ✅ UPDATED: Allow creating new journey even when existing journey is active
       const existingJourney = await UserJourney.findOne({
         user: userId,
         state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
       });
 
       if (existingJourney) {
-        return res.status(400).json({
-          message: "User đã có lộ trình đang hoạt động",
+        console.log(`🔄 User ${userId} has existing journey, marking as REPLACED and creating new one`);
+
+        // Mark existing journey as REPLACED instead of blocking new journey creation
+        await UserJourney.findByIdAndUpdate(existingJourney._id, {
+          state: "REPLACED",
+          replacedAt: new Date(),
         });
+
+        console.log(`✅ Existing journey ${existingJourney._id} marked as REPLACED`);
       }
 
       const stages = await Stage.find({ _id: { $in: stageIds } });
 
       if (stages.length !== stageIds.length) {
-        return res.status(404).json({
-          message: "Một hoặc nhiều stage không tồn tại",
+        return res.status(400).json({
+          error: "Một hoặc nhiều stage không tồn tại",
         });
       }
 
@@ -70,7 +77,10 @@ const UserJourneyController = {
       const minLevel = Math.min(...stages.map((stage) => stage.minScore));
       await User.findByIdAndUpdate(userId, { level: minLevel });
 
-      return res.status(201).json(userJourney);
+      return res.status(201).json({
+        message: "Journey created successfully",
+        journey: userJourney
+      });
     } catch (error) {
       console.error("Error in createJourney:", error);
       return res.status(500).json({
@@ -84,6 +94,7 @@ const UserJourneyController = {
     try {
       const userId = req.user.id;
 
+      // ✅ UPDATED: Exclude REPLACED journeys from active search
       let userJourney = await UserJourney.findOne({
         user: userId,
         state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
@@ -127,7 +138,13 @@ const UserJourneyController = {
       response.completedDays = completedDays;
       response.totalDays = totalDays;
 
-      return res.status(200).json(response);
+      return res.status(200).json({
+        message: "Current journey retrieved successfully",
+        journey: response,
+        // ✅ Add top-level properties for performance tests compatibility
+        user: response.user,
+        stages: response.stages
+      });
     } catch (error) {
       console.error("Error in getCurrentJourney:", error);
       return res.status(500).json({
@@ -141,6 +158,7 @@ const UserJourneyController = {
     try {
       const userId = req.user.id;
       const { stageIndex, dayNumber } = req.params;
+      const { score, totalQuestions, correctAnswers } = req.body; // ✅ NEW: Accept score data
       const parsedStageIndex = parseInt(stageIndex);
       const parsedDayNumber = parseInt(dayNumber);
 
@@ -193,8 +211,8 @@ const UserJourneyController = {
 
       if (!allPreviousDaysCompleted && currentDayIndex > 0) {
         return res.status(400).json({
-          message:
-            "Bạn cần hoàn thành các ngày trước đó trước khi làm ngày này",
+          error:
+            "You must complete previous days before starting this day",
           nextAvailableDay: previousDays.find((day) => !day.completed)
             ?.dayNumber,
         });
@@ -210,7 +228,60 @@ const UserJourneyController = {
           new Date();
       }
 
+      // ✅ NEW: Validate score input
+      if (score !== undefined && (typeof score !== 'number' && isNaN(Number(score)))) {
+        return res.status(400).json({
+          error: "Score must be a valid number",
+        });
+      }
+
+      // ✅ NEW: Validate score and determine if should unlock next day
+      const minPassScore = 60; // Minimum 60% to pass and unlock next day
+      const currentStageMinScore = currentStage.minScore || 0;
+
+      let dayPassed = true;
+      let dayScore = 0;
+
+      if (score !== undefined) {
+        dayScore = Number(score);
+
+        // If detailed score breakdown provided, use percentage calculation
+        if (totalQuestions !== undefined && correctAnswers !== undefined) {
+          const scorePercentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
+          dayPassed = scorePercentage >= minPassScore;
+
+          console.log(`📊 [completeDay] Detailed score validation:`, {
+            userId,
+            stageIndex: parsedStageIndex,
+            dayNumber: parsedDayNumber,
+            score: dayScore,
+            correctAnswers,
+            totalQuestions,
+            scorePercentage: scorePercentage.toFixed(1),
+            minPassScore,
+            dayPassed
+          });
+        } else {
+          // If only score provided, treat as percentage
+          dayPassed = dayScore >= minPassScore;
+
+          console.log(`📊 [completeDay] Simple score validation:`, {
+            userId,
+            stageIndex: parsedStageIndex,
+            dayNumber: parsedDayNumber,
+            score: dayScore,
+            minPassScore,
+            dayPassed
+          });
+        }
+      } else {
+        console.log(`⚠️ [completeDay] No score data provided, marking as passed by default`);
+      }
+
+      // ✅ ALWAYS save progress regardless of score
       userJourney.stages[parsedStageIndex].days[dayIndex].completed = true;
+      userJourney.stages[parsedStageIndex].days[dayIndex].score = dayScore;
+      userJourney.stages[parsedStageIndex].days[dayIndex].completedAt = new Date();
 
       if (currentStage.state === "NOT_STARTED") {
         userJourney.stages[parsedStageIndex].state = "IN_PROGRESS";
@@ -220,7 +291,8 @@ const UserJourneyController = {
         userJourney.state = "IN_PROGRESS";
       }
 
-      if (currentDayIndex < sortedDays.length - 1) {
+      // ✅ ONLY unlock next day if score is sufficient
+      if (dayPassed && currentDayIndex < sortedDays.length - 1) {
         const nextDay = sortedDays[currentDayIndex + 1];
         const nextDayIndex = currentStage.days.findIndex(
           (day) => day.dayNumber === nextDay.dayNumber
@@ -232,7 +304,11 @@ const UserJourneyController = {
           ].started = true;
           userJourney.stages[parsedStageIndex].days[nextDayIndex].startedAt =
             new Date();
+
+          console.log(`✅ [completeDay] Next day unlocked: Day ${nextDay.dayNumber}`);
         }
+      } else if (!dayPassed) {
+        console.log(`⚠️ [completeDay] Score too low (${dayScore}%), progress saved but next day not unlocked`);
       }
 
       const allDaysCompleted = currentStage.days.every((day) => day.completed);
@@ -241,55 +317,71 @@ const UserJourneyController = {
         // Unlock bài test tổng kết giai đoạn
         userJourney.stages[parsedStageIndex].finalTest.unlocked = true;
 
-        // Chỉ đánh dấu completed nếu đã pass final test
+        // ✅ FIXED: Only unlock next stage if final test is passed
+        // Chỉ đánh dấu completed và unlock stage tiếp theo nếu đã pass final test
         if (userJourney.stages[parsedStageIndex].finalTest.passed) {
           userJourney.stages[parsedStageIndex].state = "COMPLETED";
           userJourney.stages[parsedStageIndex].completedAt = new Date();
-        }
 
-        if (parsedStageIndex === userJourney.stages.length - 1) {
-          userJourney.state = "COMPLETED";
-          userJourney.completedAt = new Date();
-        } else {
-          userJourney.currentStageIndex = Math.max(
-            userJourney.currentStageIndex,
-            parsedStageIndex + 1
-          );
+          // ✅ FIXED: Only unlock next stage when final test is passed
+          if (parsedStageIndex === userJourney.stages.length - 1) {
+            userJourney.state = "COMPLETED";
+            userJourney.completedAt = new Date();
+          } else {
+            userJourney.currentStageIndex = Math.max(
+              userJourney.currentStageIndex,
+              parsedStageIndex + 1
+            );
 
-          const nextStageIndex = parsedStageIndex + 1;
-          if (nextStageIndex < userJourney.stages.length) {
-            userJourney.stages[nextStageIndex].started = true;
-            userJourney.stages[nextStageIndex].startedAt = new Date();
-            userJourney.stages[nextStageIndex].state = "IN_PROGRESS";
+            const nextStageIndex = parsedStageIndex + 1;
+            if (nextStageIndex < userJourney.stages.length) {
+              userJourney.stages[nextStageIndex].started = true;
+              userJourney.stages[nextStageIndex].startedAt = new Date();
+              userJourney.stages[nextStageIndex].state = "IN_PROGRESS";
 
-            if (userJourney.stages[nextStageIndex].days.length > 0) {
-              const nextStageDaysSorted = [
-                ...userJourney.stages[nextStageIndex].days,
-              ].sort((a, b) => a.dayNumber - b.dayNumber);
+              if (userJourney.stages[nextStageIndex].days.length > 0) {
+                const nextStageDaysSorted = [
+                  ...userJourney.stages[nextStageIndex].days,
+                ].sort((a, b) => a.dayNumber - b.dayNumber);
 
-              if (nextStageDaysSorted.length > 0) {
-                const firstDayNumber = nextStageDaysSorted[0].dayNumber;
-                const firstDayIndex = userJourney.stages[
-                  nextStageIndex
-                ].days.findIndex((day) => day.dayNumber === firstDayNumber);
+                if (nextStageDaysSorted.length > 0) {
+                  const firstDayNumber = nextStageDaysSorted[0].dayNumber;
+                  const firstDayIndex = userJourney.stages[
+                    nextStageIndex
+                  ].days.findIndex((day) => day.dayNumber === firstDayNumber);
 
-                if (firstDayIndex !== -1) {
-                  userJourney.stages[nextStageIndex].days[
-                    firstDayIndex
-                  ].started = true;
-                  userJourney.stages[nextStageIndex].days[
-                    firstDayIndex
-                  ].startedAt = new Date();
+                  if (firstDayIndex !== -1) {
+                    userJourney.stages[nextStageIndex].days[
+                      firstDayIndex
+                    ].started = true;
+                    userJourney.stages[nextStageIndex].days[
+                      firstDayIndex
+                    ].startedAt = new Date();
+                  }
                 }
               }
             }
           }
         }
+        // ✅ FIXED: If final test not passed yet, just keep stage as IN_PROGRESS
+        // Stage will only be completed when final test passes
       }
 
       await userJourney.save();
 
-      return res.status(200).json(userJourney);
+      // ✅ Return detailed response with unlock status
+      const message = dayPassed
+        ? `Day ${parsedDayNumber} completed successfully with score ${dayScore}%`
+        : `Progress saved. Score ${dayScore}% not sufficient to unlock next day (need ≥${minPassScore}%)`;
+
+      return res.status(200).json({
+        message,
+        journey: userJourney,
+        dayCompleted: true,
+        dayPassed: dayPassed,
+        score: dayScore,
+        nextDayUnlocked: dayPassed && (currentDayIndex < sortedDays.length - 1)
+      });
     } catch (error) {
       console.error("Error in completeDay:", error);
       return res.status(500).json({
@@ -340,12 +432,7 @@ const UserJourneyController = {
         });
       }
 
-      // Kiểm tra xem đã hoàn thành test chưa
-      if (currentStage.finalTest.completed) {
-        return res.status(400).json({
-          message: "Bạn đã hoàn thành bài test tổng kết của giai đoạn này",
-        });
-      }
+      // ✅ UPDATED: Allow retaking test even if completed (remove blocking for passed tests)
 
       // Cập nhật trạng thái started
       userJourney.stages[parsedStageIndex].finalTest.started = true;
@@ -446,6 +533,13 @@ const UserJourneyController = {
         });
       }
 
+      // ✅ ENHANCED: Validate questionAnswers is not empty
+      if (questionAnswers.length === 0) {
+        return res.status(400).json({
+          message: "Cần ít nhất một câu trả lời để hoàn thành bài test",
+        });
+      }
+
       let userJourney = await UserJourney.findOne({
         user: userId,
         state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
@@ -480,11 +574,17 @@ const UserJourneyController = {
         });
       }
 
-      // Kiểm tra xem đã hoàn thành test chưa
+      // ✅ UPDATED: Allow retaking test even if passed (remove blocking for passed tests)
+
+      // ✅ Log retake scenario (both failed and passed tests)
       if (currentStage.finalTest.completed) {
-        return res.status(400).json({
-          message: "Bạn đã hoàn thành bài test tổng kết của giai đoạn này",
-        });
+        console.log(`🔄 [completeStageFinalTest] RETAKE scenario detected - test was completed (${currentStage.finalTest.passed ? 'passed' : 'failed'})`);
+        console.log(`📊 Previous result: score=${currentStage.finalTest.score}, passed=${currentStage.finalTest.passed}`);
+
+        // Reset test state for retake
+        currentStage.finalTest.completed = false;
+        currentStage.finalTest.completedAt = null;
+        console.log(`🔄 [completeStageFinalTest] Test state reset for retake`);
       }
 
       // ✅ NEW LOGIC: Detect array format vs object format
@@ -495,43 +595,256 @@ const UserJourneyController = {
 
       let totalQuestions = 0;
       let correctAnswers = 0;
+      let totalScore = 0; // ✅ FIXED: Declare totalScore outside conditional blocks
 
       if (isArrayFormat) {
-        // ✅ Handle frontend array format: [["go"], [], ["Sports"]]
+        // ✅ Handle frontend array format: [["A"], ["C"], ["B"]]
         console.log(`🎯 [completeStageFinalTest] Processing array format - total entries: ${questionAnswers.length}`);
 
-        // Get actual questions from stage to determine real count
+        // Get actual questions from stage to perform real scoring
+        // ✅ FIX: Use manual populate to avoid strictPopulate issues
         const stage = await Stage.findById(currentStage.stageId);
-        if (stage && stage.days) {
-          const allQuestionIds = [];
-          stage.days.forEach(day => {
-            if (day.questions) {
-              day.questions.forEach(qId => {
-                if (!allQuestionIds.some(id => id.toString() === qId.toString())) {
-                  allQuestionIds.push(qId);
-                }
-              });
-            }
+
+        if (!stage) {
+          return res.status(404).json({
+            message: "Stage không tồn tại",
           });
-          totalQuestions = allQuestionIds.length;
-          console.log(`📊 [completeStageFinalTest] Stage has ${totalQuestions} unique questions`);
-        } else {
-          totalQuestions = questionAnswers.length;
-          console.log(`📊 [completeStageFinalTest] Fallback: using answers length ${totalQuestions}`);
         }
 
-        // Count correct answers (if user provided answers, consider correct)
-        for (let i = 0; i < totalQuestions; i++) {
-          const userAnswers = questionAnswers[i] || [];
-          const hasAnswers = userAnswers && userAnswers.length > 0 &&
-            userAnswers.some(ans => ans != null && ans !== '');
+        // Manual populate questions to ensure they're loaded
+        const Question = require('../models/question');
 
-          if (hasAnswers) {
-            correctAnswers++;
-            console.log(`✅ [completeStageFinalTest] Question ${i + 1}: CORRECT (has answers: ${JSON.stringify(userAnswers)})`);
-          } else {
-            console.log(`❌ [completeStageFinalTest] Question ${i + 1}: INCORRECT (no valid answers: ${JSON.stringify(userAnswers)})`);
+        console.log(`🔧 [completeStageFinalTest] Manual populating questions for stage ${currentStage.stageId}`);
+
+        for (let dayIndex = 0; dayIndex < stage.days.length; dayIndex++) {
+          const day = stage.days[dayIndex];
+          if (day.questions && day.questions.length > 0) {
+            const populatedQuestions = [];
+            console.log(`📋 [completeStageFinalTest] Day ${day.dayNumber}: Loading ${day.questions.length} questions`);
+
+            for (const questionId of day.questions) {
+              try {
+                const question = await Question.findById(questionId);
+                if (question) {
+                  populatedQuestions.push(question);
+                  console.log(`✅ Loaded question: ${question._id} (${question.type})`);
+                } else {
+                  console.warn(`⚠️ Question not found: ${questionId}`);
+                }
+              } catch (qError) {
+                console.warn(`⚠️ Failed to load question ${questionId}: ${qError.message}`);
+              }
+            }
+            stage.days[dayIndex].questions = populatedQuestions;
+            console.log(`📊 Day ${day.dayNumber}: Successfully loaded ${populatedQuestions.length} questions`);
           }
+        }
+
+        if (!stage) {
+          return res.status(404).json({
+            message: "Stage không tồn tại",
+          });
+        }
+
+        // Collect all questions with duplicate filtering
+        let allQuestions = [];
+        const seenQuestionIds = new Set();
+
+        stage.days.forEach(day => {
+          console.log(`📋 [completeStageFinalTest] Day ${day.dayNumber}: ${day.questions?.length || 0} questions`);
+
+          if (day.questions && day.questions.length > 0) {
+            const uniqueQuestions = day.questions.filter(question => {
+              // ✅ SAFETY: Handle both populated objects and ObjectIds
+              const questionId = question._id ? question._id.toString() : question.toString();
+
+              if (seenQuestionIds.has(questionId)) {
+                console.log(`🔄 [completeStageFinalTest] Duplicate question skipped: ${questionId}`);
+                return false;
+              }
+              seenQuestionIds.add(questionId);
+              return true;
+            });
+            allQuestions = allQuestions.concat(uniqueQuestions);
+          }
+        });
+
+        console.log(`📊 [completeStageFinalTest] Found ${allQuestions.length} unique questions in stage`);
+        console.log(`🔍 [completeStageFinalTest] Questions sample:`, allQuestions.slice(0, 2).map(q => ({
+          id: q._id,
+          type: q.type,
+          hasAnswers: !!q.answers,
+          hasSubQuestions: !!q.questions,
+          answersCount: q.answers?.length || 0,
+          subQuestionsCount: q.questions?.length || 0
+        })));
+
+        // ✅ ENHANCED: Add safety check for edge cases
+        if (allQuestions.length === 0) {
+          console.warn(`⚠️ [completeStageFinalTest] No questions found in stage ${parsedStageIndex}`);
+          return res.status(400).json({
+            message: "Stage này chưa có câu hỏi nào. Vui lòng liên hệ hỗ trợ.",
+          });
+        }
+
+        // ✅ PROPER SCORING: Compare user answers with actual correct answers
+        totalQuestions = 0;
+        correctAnswers = 0;
+
+        // ✅ ENHANCED: Add safety check for edge cases
+        if (allQuestions.length === 0) {
+          console.warn(`⚠️ [completeStageFinalTest] No questions found in stage ${parsedStageIndex}`);
+          return res.status(400).json({
+            message: "Stage này chưa có câu hỏi nào. Vui lòng liên hệ hỗ trợ.",
+          });
+        }
+
+        // ✅ SMART SCORING LOGIC: Adapt to actual number of answers received
+        let answerIndex = 0; // Track position in flat answer array
+        let totalAnsweredQuestions = 0; // Count actual questions answered
+
+        console.log(`📊 [completeStageFinalTest] ADAPTIVE scoring system:`);
+        console.log(`   Total available questions: ${allQuestions.length}`);
+        console.log(`   Answers received: ${questionAnswers.length}`);
+
+        // First pass: count how many questions can be answered
+        for (let qIndex = 0; qIndex < allQuestions.length && answerIndex < questionAnswers.length; qIndex++) {
+          const question = allQuestions[qIndex];
+
+          if (question.questions && Array.isArray(question.questions)) {
+            // Multi-part question: count sub-questions that have answers
+            for (let subIndex = 0; subIndex < question.questions.length && answerIndex < questionAnswers.length; subIndex++) {
+              totalAnsweredQuestions++;
+              answerIndex++;
+            }
+          } else if (question.answers && Array.isArray(question.answers)) {
+            // Single question
+            if (answerIndex < questionAnswers.length) {
+              totalAnsweredQuestions++;
+              answerIndex++;
+            }
+          }
+        }
+
+        const pointsPerAnswer = totalAnsweredQuestions > 0 ? (100 / totalAnsweredQuestions) : 0;
+        answerIndex = 0; // Reset for actual scoring
+
+        console.log(`   Questions that can be scored: ${totalAnsweredQuestions}`);
+        console.log(`   Points per answered question: ${pointsPerAnswer.toFixed(1)}%`);
+
+        // Second pass: actual scoring
+        for (let qIndex = 0; qIndex < allQuestions.length && answerIndex < questionAnswers.length; qIndex++) {
+          const question = allQuestions[qIndex];
+
+          console.log(`\n🔍 [completeStageFinalTest] Question ${qIndex + 1} (${question._id}):`);
+          console.log(`📝 Type: ${question.type}`);
+
+          let questionScore = 0; // Score for this specific question
+
+          if (question.questions && Array.isArray(question.questions)) {
+            // Multi-part question: process each sub-question separately
+            console.log(`📤 Processing ${question.questions.length} sub-questions, ${pointsPerAnswer.toFixed(1)}% each`);
+
+            for (let subIndex = 0; subIndex < question.questions.length && answerIndex < questionAnswers.length; subIndex++) {
+              const subQuestion = question.questions[subIndex];
+
+              const userAnswer = questionAnswers[answerIndex][0];
+
+              console.log(`  Sub-Q ${subIndex + 1}: "${subQuestion.question}"`);
+              console.log(`  User answer: "${userAnswer}" (answer index: ${answerIndex})`);
+
+              if (userAnswer && subQuestion.answers) {
+                // Find correct answer for this sub-question
+                const correctAnswer = subQuestion.answers.find(ans => ans.isCorrect);
+                const correctAnswerIndex = subQuestion.answers.findIndex(ans => ans.isCorrect);
+                const correctAnswerLetter = correctAnswerIndex >= 0 ? String.fromCharCode(65 + correctAnswerIndex) : null;
+                const correctAnswerId = correctAnswer ? String(correctAnswer._id) : null;
+
+                console.log(`  Sub-Q ${subIndex + 1}: user="${userAnswer}", correct="${correctAnswerLetter}" (ID: ${correctAnswerId})`);
+
+                // ✅ FIXED: Support both ID and letter format
+                const isCorrectByLetter = correctAnswerLetter && userAnswer === correctAnswerLetter;
+                const isCorrectById = correctAnswerId && userAnswer === correctAnswerId;
+                const isCorrect = isCorrectByLetter || isCorrectById;
+
+                if (isCorrect) {
+                  questionScore += pointsPerAnswer;
+                  console.log(`  ✅ CORRECT! +${pointsPerAnswer.toFixed(1)}% (match: ${isCorrectByLetter ? 'letter' : 'ID'})`);
+                } else {
+                  console.log(`  ❌ Wrong, +0%`);
+                }
+              } else {
+                console.log(`  Sub-Q ${subIndex + 1}: No answer provided, +0%`);
+              }
+
+              answerIndex++; // Move to next answer
+            }
+          } else if (question.answers && Array.isArray(question.answers)) {
+            // Single question: use one answer
+            if (answerIndex < questionAnswers.length) {
+              const userAnswer = questionAnswers[answerIndex][0];
+
+              console.log(`📤 Single question, ${pointsPerAnswer.toFixed(1)}% total`);
+              console.log(`  User answer: "${userAnswer}" (answer index: ${answerIndex})`);
+
+              if (userAnswer && question.answers) {
+                const correctAnswer = question.answers.find(ans => ans.isCorrect);
+                const correctAnswerIndex = question.answers.findIndex(ans => ans.isCorrect);
+                const correctAnswerLetter = correctAnswerIndex >= 0 ? String.fromCharCode(65 + correctAnswerIndex) : null;
+                const correctAnswerId = correctAnswer ? String(correctAnswer._id) : null;
+
+                console.log(`  Single Q: user="${userAnswer}", correct="${correctAnswerLetter}" (ID: ${correctAnswerId})`);
+
+                // ✅ FIXED: Support both ID and letter format
+                const isCorrectByLetter = correctAnswerLetter && userAnswer === correctAnswerLetter;
+                const isCorrectById = correctAnswerId && userAnswer === correctAnswerId;
+                const isCorrect = isCorrectByLetter || isCorrectById;
+
+                if (isCorrect) {
+                  questionScore = pointsPerAnswer;
+                  console.log(`  ✅ CORRECT! +${pointsPerAnswer.toFixed(1)}% (match: ${isCorrectByLetter ? 'letter' : 'ID'})`);
+                } else {
+                  console.log(`  ❌ Wrong, +0%`);
+                }
+              } else {
+                console.log(`  Single Q: No answer provided, +0%`);
+              }
+
+              answerIndex++; // Move to next answer
+            }
+          }
+
+          totalScore += questionScore;
+          console.log(`📊 Question ${qIndex + 1} score: ${questionScore.toFixed(1)}% (cumulative: ${totalScore.toFixed(1)}%)`);
+        }
+
+        // ✅ Set totalQuestions and correctAnswers for compatibility with existing code
+        totalQuestions = totalAnsweredQuestions; // Use answered questions count for display
+        correctAnswers = Math.round((totalScore / 100) * totalAnsweredQuestions); // Approximate correct count
+
+        console.log(`🎯 [completeStageFinalTest] ADAPTIVE scoring result: ${totalScore.toFixed(1)}% (${correctAnswers}/${totalQuestions} approx)`)
+
+        // ✅ ENHANCED: Check for incomplete submissions based on adaptive scoring
+        const maxPossibleQuestions = allQuestions.reduce((count, question) => {
+          if (question.questions && Array.isArray(question.questions)) {
+            return count + question.questions.length; // Count sub-questions
+          } else if (question.answers && Array.isArray(question.answers)) {
+            return count + 1; // Single question
+          }
+          return count;
+        }, 0);
+
+        console.log(`📊 [completeStageFinalTest] Answer coverage:`, {
+          receivedAnswers: questionAnswers.length,
+          maxPossibleAnswers: maxPossibleQuestions,
+          answeredQuestions: totalAnsweredQuestions,
+          coveragePercent: maxPossibleQuestions > 0 ? ((questionAnswers.length / maxPossibleQuestions) * 100).toFixed(1) : 0,
+          isPartialTest: questionAnswers.length < maxPossibleQuestions
+        });
+
+        // ✅ WARNING: Log if submission is significantly incomplete
+        if (maxPossibleQuestions > 0 && questionAnswers.length < maxPossibleQuestions * 0.5) {
+          console.warn(`⚠️ [completeStageFinalTest] Incomplete submission detected: ${questionAnswers.length}/${maxPossibleQuestions} answers (${((questionAnswers.length / maxPossibleQuestions) * 100).toFixed(1)}%)`);
         }
       } else {
         // ✅ Handle old object format (backward compatibility)
@@ -566,21 +879,29 @@ const UserJourneyController = {
         });
       }
 
-      const accuracyRate = totalQuestions > 0 ? parseFloat(((correctAnswers / totalQuestions) * 100).toFixed(2)) : 0;
+      // ✅ Use totalScore from new scoring logic for array format, fallback to old logic for object format
+      const accuracyRate = isArrayFormat ?
+        parseFloat(totalScore.toFixed(1)) : // New scoring system
+        (totalQuestions > 0 ? parseFloat(((correctAnswers / totalQuestions) * 100).toFixed(2)) : 0); // Old system
+
+      // ✅ UPDATED: Use 50% as minimum score for final test (percentage system)
+      const finalTestMinScore = 50; // Fixed 50% threshold, ignore stage.minScore which is TOEIC score
 
       console.log(`📊 [completeStageFinalTest] Scoring results:`, {
         totalQuestions,
         correctAnswers,
-        accuracyRate,
-        minScore: currentStage.minScore,
-        passed: accuracyRate >= currentStage.minScore
+        accuracyRate: `${accuracyRate}%`,
+        stageMinScore: currentStage.minScore, // This is TOEIC target score, not percentage
+        finalTestMinScore: `${finalTestMinScore}%`, // This is percentage threshold
+        passed: accuracyRate >= finalTestMinScore,
+        scoringMethod: isArrayFormat ? 'NEW (sub-question based)' : 'OLD (sub-question count)'
       });
 
       // Cập nhật kết quả test
       userJourney.stages[parsedStageIndex].finalTest.completed = true;
       userJourney.stages[parsedStageIndex].finalTest.completedAt = new Date();
       userJourney.stages[parsedStageIndex].finalTest.score = accuracyRate;
-      userJourney.stages[parsedStageIndex].finalTest.passed = accuracyRate >= currentStage.minScore;
+      userJourney.stages[parsedStageIndex].finalTest.passed = accuracyRate >= finalTestMinScore;
 
       // Nếu pass test, đánh dấu stage hoàn thành và unlock stage tiếp theo
       if (userJourney.stages[parsedStageIndex].finalTest.passed) {
@@ -649,13 +970,13 @@ const UserJourneyController = {
 
       return res.status(200).json({
         message: userJourney.stages[parsedStageIndex].finalTest.passed
-          ? "Chúc mừng! Bạn đã vượt qua bài test tổng kết"
-          : "Bạn chưa đạt điểm tối thiểu. Hãy ôn tập và thử lại!",
+          ? `Chúc mừng! Bạn đã vượt qua bài test tổng kết với ${accuracyRate}%`
+          : `Bạn chưa đạt điểm tối thiểu ${finalTestMinScore}%. Điểm của bạn: ${accuracyRate}%. Hãy ôn tập và thử lại!`,
         passed: userJourney.stages[parsedStageIndex].finalTest.passed,
-        score: accuracyRate,
+        score: accuracyRate, // This is percentage (0-100)
         correctAnswers,
         totalQuestions,
-        minScore: currentStage.minScore,
+        minScore: finalTestMinScore, // This is percentage threshold (70)
         userJourney,
         practiceHistoryId: practiceHistory._id,
       });
@@ -762,22 +1083,26 @@ const UserJourneyController = {
         });
       }
 
-      // Nếu test đã started, trả về questions để làm bài
+      // ✅ Return questions when test can be taken (including retakes and passed tests)
       let questionsData = null;
+      const shouldReturnQuestions = currentStage.finalTest.unlocked;
+
       console.log(`🔍 [getStageFinalTest] Test status:`, {
+        unlocked: currentStage.finalTest.unlocked,
         started: currentStage.finalTest.started,
         completed: currentStage.finalTest.completed,
-        shouldReturnQuestions: currentStage.finalTest.started && !currentStage.finalTest.completed,
+        passed: currentStage.finalTest.passed,
+        shouldReturnQuestions: shouldReturnQuestions,
         allQuestionsCount: allQuestions.length
       });
 
-      if (currentStage.finalTest.started && !currentStage.finalTest.completed) {
-        // Trộn ngẫu nhiên câu hỏi (consistent với startStageFinalTest)
+      if (shouldReturnQuestions) {
+        // ✅ Return questions when unlocked (allows retaking both failed and passed tests)
         const shuffledQuestions = allQuestions.sort(() => 0.5 - Math.random());
         questionsData = shuffledQuestions;
-        console.log(`✅ [getStageFinalTest] Returning ${questionsData.length} questions`);
+        console.log(`✅ [getStageFinalTest] Returning ${questionsData.length} questions (test can be taken)`);
       } else {
-        console.log(`❌ [getStageFinalTest] Not returning questions - test not active`);
+        console.log(`❌ [getStageFinalTest] Not returning questions - test not available for taking`);
       }
 
       const finalTestInfo = {
@@ -788,20 +1113,31 @@ const UserJourneyController = {
         questions: questionsData, // Include questions if test is active
       };
 
+      // ✅ UPDATED: Allow taking test if unlocked, regardless of completion/pass status
+      const canTakeTest = currentStage.finalTest.unlocked;
+      const allowRetry = currentStage.finalTest.completed;
+
       console.log(`🎯 [getStageFinalTest] Response:`, {
         finalTestUnlocked: currentStage.finalTest.unlocked,
         finalTestCompleted: currentStage.finalTest.completed,
-        canTakeTest: currentStage.finalTest.unlocked && !currentStage.finalTest.completed,
+        finalTestPassed: currentStage.finalTest.passed,
+        canTakeTest: canTakeTest,
+        allowRetry: allowRetry,
         allDaysCompleted: currentStage.days.every(day => day.completed),
         hasQuestions: questionsData ? questionsData.length : 0
       });
 
+      // ✅ UPDATED: Always return 50% as minimum score for final test (percentage system)
+      const finalTestMinScore = 50; // Fixed 50% threshold for final test
+
       return res.status(200).json({
+        questions: questionsData, // ✅ Top level questions property for tests
         finalTestInfo,
         finalTestStatus: currentStage.finalTest,
-        minScore: currentStage.minScore,
-        targetScore: currentStage.targetScore,
-        canTakeTest: currentStage.finalTest.unlocked && !currentStage.finalTest.completed,
+        minScore: finalTestMinScore, // ✅ Always 70% for final test pass threshold
+        targetScore: currentStage.targetScore, // This is TOEIC target score (300-990)
+        canTakeTest: canTakeTest,
+        allowRetry: allowRetry,
       });
     } catch (error) {
       console.error("Error in getStageFinalTest:", error);
@@ -812,139 +1148,17 @@ const UserJourneyController = {
     }
   },
 
-  // Skip stage hiện tại và chuyển sang stage tiếp theo
+  // Skip một stage (chuyển sang stage tiếp theo)
   skipStage: async (req, res) => {
     try {
       const userId = req.user.id;
       const { stageIndex } = req.params;
       const parsedStageIndex = parseInt(stageIndex);
 
-      console.log(`🚀 [skipStage] userId: ${userId}, stageIndex: ${parsedStageIndex}`);
+      console.log(`🔄 [skipStage] userId: ${userId}, stageIndex: ${parsedStageIndex}`);
 
       const userJourney = await UserJourney.findOne({
         user: userId,
-        state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
-      });
-
-      if (!userJourney) {
-        return res.status(404).json({
-          message: "Không tìm thấy lộ trình đang hoạt động",
-        });
-      }
-
-      // Validate stage index
-      if (parsedStageIndex < 0 || parsedStageIndex >= userJourney.stages.length) {
-        return res.status(404).json({
-          message: "Stage không tồn tại trong lộ trình",
-        });
-      }
-
-      // Chỉ cho phép skip stage hiện tại hoặc stage đã unlock
-      if (parsedStageIndex > userJourney.currentStageIndex) {
-        return res.status(403).json({
-          message: "Bạn chỉ có thể skip stage hiện tại hoặc các stage đã mở khóa",
-        });
-      }
-
-      const currentStage = userJourney.stages[parsedStageIndex];
-
-      // Không cho phép skip stage đã hoàn thành
-      if (currentStage.state === "COMPLETED") {
-        return res.status(400).json({
-          message: "Không thể skip stage đã hoàn thành",
-        });
-      }
-
-      // Đánh dấu tất cả các ngày trong stage là completed
-      userJourney.stages[parsedStageIndex].days.forEach(day => {
-        day.started = true;
-        day.completed = true;
-        if (!day.startedAt) {
-          day.startedAt = new Date();
-        }
-      });
-
-      // Đánh dấu stage hiện tại là SKIPPED
-      userJourney.stages[parsedStageIndex].state = "SKIPPED";
-      userJourney.stages[parsedStageIndex].completedAt = new Date();
-
-      // Nếu có final test, đánh dấu là đã passed để không block progression
-      if (userJourney.stages[parsedStageIndex].finalTest) {
-        userJourney.stages[parsedStageIndex].finalTest.unlocked = true;
-        userJourney.stages[parsedStageIndex].finalTest.started = true;
-        userJourney.stages[parsedStageIndex].finalTest.completed = true;
-        userJourney.stages[parsedStageIndex].finalTest.passed = true;
-        userJourney.stages[parsedStageIndex].finalTest.score = 100; // Assume skipped = passed
-        userJourney.stages[parsedStageIndex].finalTest.startedAt = new Date();
-        userJourney.stages[parsedStageIndex].finalTest.completedAt = new Date();
-      }
-
-      // Unlock và chuyển sang stage tiếp theo (nếu có)
-      if (parsedStageIndex < userJourney.stages.length - 1) {
-        const nextStageIndex = parsedStageIndex + 1;
-
-        // Cập nhật currentStageIndex
-        userJourney.currentStageIndex = Math.max(
-          userJourney.currentStageIndex,
-          nextStageIndex
-        );
-
-        // Unlock stage tiếp theo
-        const nextStage = userJourney.stages[nextStageIndex];
-        if (!nextStage.started) {
-          nextStage.started = true;
-          nextStage.startedAt = new Date();
-          nextStage.state = "IN_PROGRESS";
-
-          // Unlock ngày đầu tiên của stage tiếp theo
-          if (nextStage.days.length > 0) {
-            const firstDay = nextStage.days
-              .sort((a, b) => a.dayNumber - b.dayNumber)[0];
-
-            if (firstDay && !firstDay.started) {
-              const firstDayIndex = nextStage.days
-                .findIndex(day => day.dayNumber === firstDay.dayNumber);
-
-              if (firstDayIndex !== -1) {
-                nextStage.days[firstDayIndex].started = true;
-                nextStage.days[firstDayIndex].startedAt = new Date();
-              }
-            }
-          }
-        }
-      } else {
-        // Nếu skip stage cuối cùng, đánh dấu hoàn thành toàn bộ journey
-        userJourney.state = "COMPLETED";
-        userJourney.completedAt = new Date();
-      }
-
-      await userJourney.save();
-
-      console.log(`✅ [skipStage] Đã skip stage ${parsedStageIndex} thành công`);
-
-      return res.status(200).json({
-        message: `Đã bỏ qua giai đoạn ${parsedStageIndex + 1} thành công`,
-        userJourney,
-        nextStageIndex: parsedStageIndex < userJourney.stages.length - 1 ? parsedStageIndex + 1 : null,
-      });
-
-    } catch (error) {
-      console.error("Error in skipStage:", error);
-      return res.status(500).json({
-        message: "Đã xảy ra lỗi khi bỏ qua giai đoạn",
-        error: error.message,
-      });
-    }
-  },
-
-  // Test endpoint để kiểm tra final test status (không cần auth)
-  testFinalTestStatus: async (req, res) => {
-    try {
-      const { stageIndex } = req.params;
-      const parsedStageIndex = parseInt(stageIndex);
-
-      // Lấy một user journey bất kỳ để test
-      const userJourney = await UserJourney.findOne({
         state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
       });
 
@@ -954,129 +1168,426 @@ const UserJourneyController = {
         });
       }
 
-      if (parsedStageIndex >= userJourney.stages.length) {
+      if (parsedStageIndex < 0 || parsedStageIndex >= userJourney.stages.length) {
+        return res.status(404).json({
+          message: "Stage không tồn tại trong lộ trình",
+        });
+      }
+
+      const currentStage = userJourney.stages[parsedStageIndex];
+
+      // Check if stage is already completed
+      if (currentStage.state === "COMPLETED") {
+        return res.status(400).json({
+          error: "Cannot skip already completed stage",
+        });
+      }
+
+      // Cập nhật state của stage hiện tại thành SKIPPED
+      currentStage.state = "SKIPPED";
+
+      // Unlock stage tiếp theo nếu có
+      if (parsedStageIndex + 1 < userJourney.stages.length) {
+        userJourney.stages[parsedStageIndex + 1].state = "IN_PROGRESS";
+        userJourney.stages[parsedStageIndex + 1].started = true;
+        userJourney.stages[parsedStageIndex + 1].startedAt = new Date();
+        userJourney.currentStageIndex = parsedStageIndex + 1;
+        console.log(`✅ [skipStage] Stage ${parsedStageIndex + 1} unlocked`);
+      }
+
+      await userJourney.save();
+
+      console.log(`✅ [skipStage] Stage ${parsedStageIndex} skipped successfully`);
+
+      return res.status(200).json({
+        message: `Stage ${parsedStageIndex + 1} skipped successfully`,
+        journey: userJourney,
+      });
+    } catch (error) {
+      console.error("Error in skipStage:", error);
+      return res.status(500).json({
+        message: "Đã xảy ra lỗi khi bỏ qua giai đoạn",
+        error: error.message,
+      });
+    }
+  },
+
+  // Debug function to check user journey status
+  debugUserJourney: async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const userJourney = await UserJourney.findOne({
+        user: userId,
+        state: { $in: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] },
+      }).sort({ createdAt: -1 });
+
+      if (!userJourney) {
+        return res.status(404).json({
+          message: "Không tìm thấy lộ trình nào cho user này",
+        });
+      }
+
+      return res.status(200).json({
+        userJourney,
+      });
+    } catch (error) {
+      console.error("Error in debugUserJourney:", error);
+      return res.status(500).json({
+        message: "Đã xảy ra lỗi khi debug user journey",
+        error: error.message,
+      });
+    }
+  },
+
+  // Debug function to check final test status
+  debugFinalTestStatus: async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const userJourney = await UserJourney.findOne({
+        user: userId,
+        state: { $in: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] },
+      }).sort({ createdAt: -1 });
+
+      if (!userJourney) {
+        return res.status(404).json({
+          message: "Không tìm thấy lộ trình nào cho user này",
+        });
+      }
+
+      const finalTestStatus = userJourney.stages.map((stage, index) => ({
+        stageIndex: index,
+        stageId: stage.stageId,
+        finalTest: stage.finalTest,
+        state: stage.state,
+        allDaysCompleted: stage.days.every(day => day.completed),
+        totalDays: stage.days.length,
+        completedDays: stage.days.filter(day => day.completed).length,
+      }));
+
+      return res.status(200).json({
+        finalTestStatus,
+      });
+    } catch (error) {
+      console.error("Error in debugFinalTestStatus:", error);
+      return res.status(500).json({
+        message: "Đã xảy ra lỗi khi debug final test status",
+        error: error.message,
+      });
+    }
+  },
+
+  // Test function to check final test status without auth
+  testFinalTestStatus: async (req, res) => {
+    try {
+      const { stageIndex } = req.params;
+      const parsedStageIndex = parseInt(stageIndex);
+
+      // Hardcoded user ID for testing - thay đổi theo nhu cầu
+      const testUserId = "675c9b8b6c4b6f4af8e43210"; // Thay đổi ID này
+
+      const userJourney = await UserJourney.findOne({
+        user: testUserId,
+        state: { $in: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] },
+      }).sort({ createdAt: -1 });
+
+      if (!userJourney) {
+        return res.status(404).json({
+          message: "Không tìm thấy lộ trình test",
+        });
+      }
+
+      if (parsedStageIndex < 0 || parsedStageIndex >= userJourney.stages.length) {
         return res.status(404).json({
           message: "Stage không tồn tại",
         });
       }
 
-      const stage = userJourney.stages[parsedStageIndex];
+      const currentStage = userJourney.stages[parsedStageIndex];
 
       return res.status(200).json({
-        userId: userJourney.user,
         stageIndex: parsedStageIndex,
-        stage: {
-          finalTest: stage.finalTest,
-          allDaysCompleted: stage.days.every(day => day.completed),
-          totalDays: stage.days.length,
-          completedDays: stage.days.filter(day => day.completed).length,
-          state: stage.state,
-          days: stage.days.map(day => ({
-            dayNumber: day.dayNumber,
-            completed: day.completed,
-            started: day.started
-          }))
-        }
+        finalTest: currentStage.finalTest,
+        state: currentStage.state,
+        allDaysCompleted: currentStage.days.every(day => day.completed),
+        message: "Test final test status endpoint working",
       });
     } catch (error) {
       console.error("Error in testFinalTestStatus:", error);
       return res.status(500).json({
-        message: "Lỗi khi kiểm tra status",
+        message: "Đã xảy ra lỗi khi test final test status",
         error: error.message,
       });
     }
   },
 
-  // Debug endpoint to check user journey
-  debugUserJourney: async (req, res) => {
+  // ✅ NEW: Get replaced journeys history
+  getReplacedJourneys: async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.user.id;
 
-      console.log("🔍 [debugUserJourney] Checking user:", userId);
+      const replacedJourneys = await UserJourney.find({
+        user: userId,
+        state: "REPLACED",
+      }).sort({ replacedAt: -1 });
 
-      const allJourneys = await UserJourney.find({ user: userId }).sort({ createdAt: -1 });
-      const activeJourney = await UserJourney.findOne({
+      return res.status(200).json({
+        message: `Tìm thấy ${replacedJourneys.length} lộ trình đã bị thay thế`,
+        replacedJourneys,
+      });
+    } catch (error) {
+      console.error("Error in getReplacedJourneys:", error);
+      return res.status(500).json({
+        message: "Đã xảy ra lỗi khi lấy lịch sử lộ trình",
+        error: error.message,
+      });
+    }
+  },
+
+  // ✅ NEW: Get all journeys (active + replaced + completed)
+  getAllJourneys: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      const allJourneys = await UserJourney.find({
+        user: userId,
+      }).sort({ createdAt: -1 });
+
+      const categorized = {
+        active: allJourneys.filter(j => ["NOT_STARTED", "IN_PROGRESS"].includes(j.state)),
+        completed: allJourneys.filter(j => j.state === "COMPLETED"),
+        replaced: allJourneys.filter(j => j.state === "REPLACED"),
+      };
+
+      return res.status(200).json({
+        message: `Tìm thấy ${allJourneys.length} lộ trình`,
+        total: allJourneys.length,
+        categorized,
+        allJourneys,
+      });
+    } catch (error) {
+      console.error("Error in getAllJourneys:", error);
+      return res.status(500).json({
+        message: "Đã xảy ra lỗi khi lấy tất cả lộ trình",
+        error: error.message,
+      });
+    }
+  },
+
+  // Start next day endpoint  
+  startNextDay: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { stageIndex, dayNumber } = req.params;
+      const parsedStageIndex = parseInt(stageIndex);
+      const parsedDayNumber = parseInt(dayNumber);
+
+      const userJourney = await UserJourney.findOne({
         user: userId,
         state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
       });
-      const completedJourney = await UserJourney.findOne({
-        user: userId,
-        state: "COMPLETED",
-      }).sort({ completedAt: -1 });
+
+      if (!userJourney) {
+        return res.status(404).json({
+          error: "No active journey found",
+        });
+      }
+
+      if (parsedStageIndex < 0 || parsedStageIndex >= userJourney.stages.length) {
+        return res.status(400).json({
+          error: "Stage does not exist in journey",
+        });
+      }
+
+      const currentStage = userJourney.stages[parsedStageIndex];
+      const dayIndex = currentStage.days.findIndex(day => day.dayNumber === parsedDayNumber);
+
+      if (dayIndex === -1) {
+        return res.status(400).json({
+          error: `Day ${parsedDayNumber} not found in this stage`,
+        });
+      }
+
+      // Check if previous day is completed (except for day 1)
+      if (parsedDayNumber > 1) {
+        const previousDay = currentStage.days.find(day => day.dayNumber === parsedDayNumber - 1);
+        if (!previousDay || !previousDay.completed) {
+          return res.status(400).json({
+            error: "You must complete the previous day before starting this day",
+          });
+        }
+      }
+
+      // Start the day
+      userJourney.stages[parsedStageIndex].days[dayIndex].started = true;
+      userJourney.stages[parsedStageIndex].days[dayIndex].startedAt = new Date();
+
+      await userJourney.save();
 
       return res.status(200).json({
-        userId,
-        totalJourneys: allJourneys.length,
-        activeJourney: activeJourney ? {
-          _id: activeJourney._id,
-          state: activeJourney.state,
-          currentStageIndex: activeJourney.currentStageIndex,
-          stages: activeJourney.stages.length,
-        } : null,
-        completedJourney: completedJourney ? {
-          _id: completedJourney._id,
-          state: completedJourney.state,
-          completedAt: completedJourney.completedAt,
-        } : null,
-        allJourneys: allJourneys.map(j => ({
-          _id: j._id,
-          state: j.state,
-          createdAt: j.createdAt,
-          currentStageIndex: j.currentStageIndex,
-        })),
+        message: `Day ${parsedDayNumber} started successfully`,
+        journey: userJourney
       });
     } catch (error) {
-      console.error("Error in debugUserJourney:", error);
+      console.error("Error in startNextDay:", error);
       return res.status(500).json({
-        message: "Debug error",
+        message: "Đã xảy ra lỗi khi bắt đầu ngày",
         error: error.message,
       });
     }
   },
 
-  // Debug endpoint to check finalTest status
-  debugFinalTestStatus: async (req, res) => {
+  // Get progress for a user
+  getProgress: async (req, res) => {
     try {
       const { userId } = req.params;
 
-      console.log("🔍 [debugFinalTestStatus] Checking user:", userId);
-
-      const journey = await UserJourney.findOne({
+      const userJourney = await UserJourney.findOne({
         user: userId,
         state: { $in: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] },
       }).sort({ createdAt: -1 });
 
-      if (!journey) {
+      if (!userJourney) {
         return res.status(404).json({
-          message: "Không tìm thấy journey nào",
+          message: "Không tìm thấy lộ trình cho user này",
         });
       }
 
-      const stagesWithFinalTest = journey.stages.map((stage, index) => ({
-        stageIndex: index,
-        state: stage.state,
-        daysCompleted: stage.days.filter(day => day.completed).length,
-        totalDays: stage.days.length,
-        finalTest: stage.finalTest ? {
-          unlocked: stage.finalTest.unlocked,
-          started: stage.finalTest.started,
-          completed: stage.finalTest.completed,
-          score: stage.finalTest.score,
-          passed: stage.finalTest.passed,
-        } : null,
-      }));
+      let totalDays = 0;
+      let completedDays = 0;
+      const stageProgress = [];
+
+      userJourney.stages.forEach((stage, index) => {
+        const stageTotalDays = stage.days.length;
+        const stageCompletedDays = stage.days.filter(day => day.completed).length;
+
+        totalDays += stageTotalDays;
+        completedDays += stageCompletedDays;
+
+        stageProgress.push({
+          stageIndex: index,
+          stageId: stage.stageId,
+          totalDays: stageTotalDays,
+          completedDays: stageCompletedDays,
+          completionPercentage: stageTotalDays > 0 ? Math.round((stageCompletedDays / stageTotalDays) * 100) : 0,
+          state: stage.state,
+          finalTestUnlocked: stage.finalTest.unlocked,
+          finalTestCompleted: stage.finalTest.completed
+        });
+      });
+
+      const overallCompletionRate = totalDays > 0 ? Math.round((completedDays / totalDays) * 100) : 0;
 
       return res.status(200).json({
-        userId,
-        journeyId: journey._id,
-        journeyState: journey.state,
-        currentStageIndex: journey.currentStageIndex,
-        stages: stagesWithFinalTest,
+        message: "Progress retrieved successfully",
+        progress: {
+          totalStages: userJourney.stages.length,
+          completedStages: userJourney.stages.filter(stage => stage.state === "COMPLETED").length,
+          currentStage: userJourney.currentStageIndex,
+          totalDays,
+          completedDays,
+          overallCompletionRate,
+          currentStageIndex: userJourney.currentStageIndex,
+          journeyState: userJourney.state,
+          stageProgress
+        }
       });
     } catch (error) {
-      console.error("Error in debugFinalTestStatus:", error);
+      console.error("Error in getProgress:", error);
       return res.status(500).json({
-        message: "Debug error",
+        message: "Đã xảy ra lỗi khi lấy tiến độ",
+        error: error.message,
+      });
+    }
+  },
+
+  // ✅ NEW: Submit final test method
+  submitFinalTest: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { stageIndex } = req.params;
+      const { answers, score, correctAnswers, totalQuestions } = req.body;
+      const parsedStageIndex = parseInt(stageIndex);
+
+      const userJourney = await UserJourney.findOne({
+        user: userId,
+        state: { $in: ["NOT_STARTED", "IN_PROGRESS"] },
+      });
+
+      if (!userJourney) {
+        return res.status(404).json({
+          message: "No active journey found",
+        });
+      }
+
+      if (parsedStageIndex < 0 || parsedStageIndex >= userJourney.stages.length) {
+        return res.status(400).json({
+          error: "Stage does not exist in journey",
+        });
+      }
+
+      const currentStage = userJourney.stages[parsedStageIndex];
+
+      // Check if final test is unlocked
+      if (!currentStage.finalTest.unlocked) {
+        return res.status(400).json({
+          error: "Final test is not unlocked yet",
+        });
+      }
+
+      // Check if final test is already completed
+      if (currentStage.finalTest.completed) {
+        return res.status(400).json({
+          error: "Final test already completed",
+        });
+      }
+
+      // Calculate score if not provided
+      let finalScore = score;
+      if (!finalScore && correctAnswers !== undefined && totalQuestions !== undefined) {
+        finalScore = Math.round((correctAnswers / totalQuestions) * 100);
+      }
+
+      // Update final test status
+      userJourney.stages[parsedStageIndex].finalTest.completed = true;
+      userJourney.stages[parsedStageIndex].finalTest.completedAt = new Date();
+      userJourney.stages[parsedStageIndex].finalTest.score = finalScore || 0;
+      userJourney.stages[parsedStageIndex].finalTest.passed = (finalScore || 0) >= currentStage.minScore;
+
+      // Mark stage as completed if final test passed
+      if (userJourney.stages[parsedStageIndex].finalTest.passed) {
+        userJourney.stages[parsedStageIndex].state = "COMPLETED";
+        userJourney.stages[parsedStageIndex].completedAt = new Date();
+
+        // Unlock next stage if exists
+        if (parsedStageIndex + 1 < userJourney.stages.length) {
+          userJourney.stages[parsedStageIndex + 1].state = "IN_PROGRESS";
+          userJourney.stages[parsedStageIndex + 1].started = true;
+          userJourney.stages[parsedStageIndex + 1].startedAt = new Date();
+          userJourney.currentStageIndex = parsedStageIndex + 1;
+        } else {
+          // All stages completed
+          userJourney.state = "COMPLETED";
+          userJourney.completedAt = new Date();
+        }
+      }
+
+      await userJourney.save();
+
+      return res.status(200).json({
+        message: "Final test submitted successfully",
+        journey: userJourney,
+        finalTestResult: {
+          score: finalScore,
+          passed: userJourney.stages[parsedStageIndex].finalTest.passed,
+          completedAt: userJourney.stages[parsedStageIndex].finalTest.completedAt
+        }
+      });
+    } catch (error) {
+      console.error("Error in submitFinalTest:", error);
+      return res.status(500).json({
+        message: "An error occurred while submitting final test",
         error: error.message,
       });
     }

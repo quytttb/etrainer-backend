@@ -41,7 +41,7 @@ const userSchema = new Schema(
     gender: {
       type: String,
       enum: ["MALE", "FEMALE", "OTHER"],
-      default: null,
+      default: "OTHER",
     },
     registrationMethod: {
       type: String,

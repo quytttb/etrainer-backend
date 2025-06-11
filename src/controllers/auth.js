@@ -61,13 +61,26 @@ const AuthController = {
     const { name, email, phone, password } = req.body;
 
     try {
+      // Validate required fields
+      if (!name || !email || !password) {
+        return res.status(400).json({
+          error: "Name, email, and password are required",
+        });
+      }
+
+      // Build query conditions, filtering out undefined values
+      const queryConditions = [{ email }];
+      if (phone) {
+        queryConditions.push({ phone });
+      }
+
       const emailOrPhoneExists = await User.findOne({
-        $or: [{ email }, { phone }],
+        $or: queryConditions,
       }).exec();
 
       if (emailOrPhoneExists) {
         return res.status(400).json({
-          message: "Email or phone exists",
+          error: "Email or phone already exists",
         });
       }
 
@@ -77,7 +90,7 @@ const AuthController = {
       const userCount = await User.countDocuments();
       const role = userCount > 0 ? "USER" : "ADMIN";
 
-      await new User({
+      const newUser = await new User({
         name,
         email,
         phone,
@@ -85,13 +98,16 @@ const AuthController = {
         role,
       }).save();
 
+      // Return user object without password for security
+      const userResponse = newUser.toObject();
+      delete userResponse.password;
+
       res.status(201).json({
-        status: true,
         message: "Register successfully",
+        user: userResponse,
       });
     } catch (error) {
       res.status(500).json({
-        message: "Internal server error",
         error: error.message,
       });
     }
@@ -105,25 +121,29 @@ const AuthController = {
       const findUser = await User.findOne({ email }).exec();
 
       if (!findUser) {
-        return res.status(404).json({ message: "Unregistered account!" });
+        return res.status(401).json({ error: "Invalid credentials" });
       }
 
       // check password
       const isPasswordValid = await bcrypt.compare(password, findUser.password);
 
       if (!isPasswordValid) {
-        return res.status(400).json({ message: "Wrong password!" });
+        return res.status(401).json({ error: "Invalid credentials" });
       }
 
       const token = AuthController.generateAccessToken(findUser);
 
+      // Return user object without password for security  
+      const userResponse = findUser.toObject();
+      delete userResponse.password;
+
       res.json({
         token,
+        user: userResponse,
         isAdmin: findUser.role === "ADMIN",
       });
     } catch (error) {
       res.status(500).json({
-        message: "Internal server error",
         error: error.message,
       });
     }

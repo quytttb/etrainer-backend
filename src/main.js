@@ -10,9 +10,15 @@ const app = express();
 
 app.use(express.json());
 app.use(morgan("dev"));
+
+// 🔧 SECURITY FIX: Use environment variables for CORS configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ["http://localhost:5173", "http://localhost:8081"];
+
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:8081", "exp://10.95.84.46:8081", "http://10.95.84.46:8081"],
+    origin: allowedOrigins,
     credentials: true
   })
 );

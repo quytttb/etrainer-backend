@@ -18,7 +18,19 @@ userJourneyRouter.put(
   UserJourneyController.completeDay
 );
 
+userJourneyRouter.put(
+  "/start-next-day/:stageIndex/:dayNumber",
+  checkLogin,
+  UserJourneyController.startNextDay
+);
+
 // Routes cho final test
+userJourneyRouter.get(
+  "/final-test/:stageIndex",
+  checkLogin,
+  UserJourneyController.getStageFinalTest
+);
+
 userJourneyRouter.get(
   "/stage-final-test/:stageIndex",
   checkLogin,
@@ -37,8 +49,15 @@ userJourneyRouter.put(
   UserJourneyController.completeStageFinalTest
 );
 
-// Route skip stage
+// ✅ NEW: Route for submitting final test
 userJourneyRouter.put(
+  "/submit-final-test/:stageIndex",
+  checkLogin,
+  UserJourneyController.submitFinalTest
+);
+
+// Route skip stage
+userJourneyRouter.post(
   "/skip-stage/:stageIndex",
   checkLogin,
   UserJourneyController.skipStage
@@ -60,6 +79,27 @@ userJourneyRouter.get(
 userJourneyRouter.get(
   "/debug-finaltest/:userId",
   UserJourneyController.debugFinalTestStatus
+);
+
+// ✅ NEW: Get replaced journeys history
+userJourneyRouter.get(
+  "/replaced",
+  checkLogin,
+  UserJourneyController.getReplacedJourneys
+);
+
+// ✅ NEW: Get all journeys
+userJourneyRouter.get(
+  "/all",
+  checkLogin,
+  UserJourneyController.getAllJourneys
+);
+
+// Progress tracking route
+userJourneyRouter.get(
+  "/progress/:userId",
+  checkLogin,
+  UserJourneyController.getProgress
 );
 
 module.exports = userJourneyRouter;

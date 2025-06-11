@@ -4,12 +4,12 @@ const { checkLogin, isAdmin } = require("../middlewares/auth");
 
 const migrationRouter = express.Router();
 
-// Endpoint migration (temporarily without auth for easy migration)
-migrationRouter.post("/final-test", MigrationController.migrateFinalTest);
-migrationRouter.get("/final-test/status", MigrationController.checkMigrationStatus);
+// 🔒 SECURITY FIX: Secure migration endpoints with admin authentication
+migrationRouter.post("/final-test", checkLogin, isAdmin, MigrationController.migrateFinalTest);
+migrationRouter.get("/final-test/status", checkLogin, isAdmin, MigrationController.checkMigrationStatus);
 
-// Secure endpoints (with auth) - commented out for now
-// migrationRouter.post("/final-test", checkLogin, isAdmin, MigrationController.migrateFinalTest);
-// migrationRouter.get("/final-test/status", checkLogin, isAdmin, MigrationController.checkMigrationStatus);
+// 🚨 DANGEROUS: Temporarily without auth for easy migration (REMOVED FOR SECURITY)
+// migrationRouter.post("/final-test", MigrationController.migrateFinalTest);
+// migrationRouter.get("/final-test/status", MigrationController.checkMigrationStatus);
 
 module.exports = migrationRouter; 

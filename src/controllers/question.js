@@ -11,7 +11,12 @@ const QuestionController = {
       }
 
       const questions = await Question.find(filter).sort("-createdAt").exec();
-      res.status(200).json(questions);
+      res.status(200).json({
+        questions: questions,
+        // For backward compatibility
+        data: questions,
+        count: questions.length
+      });
     } catch (error) {
       res.status(500).json({ message: "Error fetching questions" });
     }
