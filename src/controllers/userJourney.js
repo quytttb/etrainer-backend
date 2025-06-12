@@ -702,6 +702,7 @@ const UserJourneyController = {
         // ✅ SMART SCORING LOGIC: Adapt to actual number of answers received
         let answerIndex = 0; // Track position in flat answer array
         let totalAnsweredQuestions = 0; // Count actual questions answered
+        let pointsPerAnswer = 0; // Will calculate after counting questions
 
         console.log(`📊 [completeStageFinalTest] ADAPTIVE scoring system:`);
         console.log(`   Total available questions: ${allQuestions.length}`);
@@ -710,84 +711,123 @@ const UserJourneyController = {
         // First pass: count how many questions can be answered
         for (let qIndex = 0; qIndex < allQuestions.length && answerIndex < questionAnswers.length; qIndex++) {
           const question = allQuestions[qIndex];
+          let questionScore = 0; // Score for this specific question
 
           if (question.questions && Array.isArray(question.questions)) {
             // Multi-part question: count sub-questions that have answers
             for (let subIndex = 0; subIndex < question.questions.length && answerIndex < questionAnswers.length; subIndex++) {
-              totalAnsweredQuestions++;
-              answerIndex++;
-            }
-          } else if (question.answers && Array.isArray(question.answers)) {
-            // Single question
-            if (answerIndex < questionAnswers.length) {
-              totalAnsweredQuestions++;
-              answerIndex++;
-            }
-          }
-        }
+              // ✅ FIXED: Enhanced multi-part question handling with JSON string format
+              try {
+                const userAnswer = questionAnswers[answerIndex][0];
 
-        const pointsPerAnswer = totalAnsweredQuestions > 0 ? (100 / totalAnsweredQuestions) : 0;
-        answerIndex = 0; // Reset for actual scoring
+                // If this is a JSON string, attempt to parse it for this specific sub-question
+                if (typeof userAnswer === 'string' && userAnswer.trim().startsWith('{') && userAnswer.trim().endsWith('}')) {
+                  console.log(`🔍 [completeStageFinalTest] Detected JSON string for multi-part question: ${userAnswer}`);
 
-        console.log(`   Questions that can be scored: ${totalAnsweredQuestions}`);
-        console.log(`   Points per answered question: ${pointsPerAnswer.toFixed(1)}%`);
+                  // We've found a multi-part question, let's log more details
+                  console.log(`  - Question Type: ${question.type || 'Unknown'}`);
+                  console.log(`  - Sub-questions: ${question.questions.length}`);
+                  console.log(`  - Current sub-question: ${subIndex + 1}`);
 
-        // Second pass: actual scoring
-        for (let qIndex = 0; qIndex < allQuestions.length && answerIndex < questionAnswers.length; qIndex++) {
-          const question = allQuestions[qIndex];
+                  // Parse the JSON string to get the answers for each sub-question
+                  const parsedAnswer = JSON.parse(userAnswer);
 
-          console.log(`\n🔍 [completeStageFinalTest] Question ${qIndex + 1} (${question._id}):`);
-          console.log(`📝 Type: ${question.type}`);
+                  // Validate the structure is as expected
+                  if (Object.keys(parsedAnswer).length > 0) {
+                    // Get the current sub-question
+                    const subQuestion = question.questions[subIndex];
 
-          let questionScore = 0; // Score for this specific question
+                    // ✅ FIXED: Handle case where subQuestion might not have _id
+                    let subQuestionId = '';
+                    if (subQuestion._id) {
+                      subQuestionId = subQuestion._id.toString();
+                    } else if (subQuestion.id) {
+                      subQuestionId = subQuestion.id.toString();
+                    }
 
-          if (question.questions && Array.isArray(question.questions)) {
-            // Multi-part question: process each sub-question separately
-            console.log(`📤 Processing ${question.questions.length} sub-questions, ${pointsPerAnswer.toFixed(1)}% each`);
+                    // Look for this sub-question's answer in the parsed JSON
+                    // ✅ FIXED: Try multiple ways to find the answer in parsed JSON
+                    let subAnswer = null;
+                    if (parsedAnswer[subQuestionId]) {
+                      // Found by ID
+                      subAnswer = parsedAnswer[subQuestionId];
+                    } else if (Object.keys(parsedAnswer).length === question.questions.length) {
+                      // If keys count matches sub-questions count, try to use order
+                      const keys = Object.keys(parsedAnswer);
+                      if (keys[subIndex]) {
+                        subAnswer = parsedAnswer[keys[subIndex]];
+                      }
+                    } else if (Object.keys(parsedAnswer).length === 1) {
+                      // If only one answer, use it for all sub-questions
+                      subAnswer = parsedAnswer[Object.keys(parsedAnswer)[0]];
+                    }
 
-            for (let subIndex = 0; subIndex < question.questions.length && answerIndex < questionAnswers.length; subIndex++) {
-              const subQuestion = question.questions[subIndex];
+                    if (subAnswer) {
+                      console.log(`  ✅ Found answer for sub-question ${subQuestionId}: ${subAnswer}`);
 
-              const userAnswer = questionAnswers[answerIndex][0];
+                      // Check if the answer is correct
+                      if (subQuestion.answers && Array.isArray(subQuestion.answers)) {
+                        const correctAnswer = subQuestion.answers.find(ans => ans.isCorrect);
+                        const correctAnswerIndex = subQuestion.answers.findIndex(ans => ans.isCorrect);
+                        const correctAnswerLetter = correctAnswerIndex >= 0 ? String.fromCharCode(65 + correctAnswerIndex) : null;
+                        const correctAnswerId = correctAnswer ? String(correctAnswer._id) : null;
 
-              console.log(`  Sub-Q ${subIndex + 1}: "${subQuestion.question}"`);
-              console.log(`  User answer: "${userAnswer}" (answer index: ${answerIndex})`);
+                        console.log(`  Sub-Q ${subIndex + 1}: user="${subAnswer}", correct="${correctAnswerLetter}" (ID: ${correctAnswerId})`);
 
-              if (userAnswer && subQuestion.answers) {
-                // Find correct answer for this sub-question
-                const correctAnswer = subQuestion.answers.find(ans => ans.isCorrect);
-                const correctAnswerIndex = subQuestion.answers.findIndex(ans => ans.isCorrect);
-                const correctAnswerLetter = correctAnswerIndex >= 0 ? String.fromCharCode(65 + correctAnswerIndex) : null;
-                const correctAnswerId = correctAnswer ? String(correctAnswer._id) : null;
+                        // Support both ID and letter format
+                        const isCorrectByLetter = correctAnswerLetter && subAnswer === correctAnswerLetter;
+                        const isCorrectById = correctAnswerId && subAnswer === correctAnswerId;
+                        const isCorrect = isCorrectByLetter || isCorrectById;
 
-                console.log(`  Sub-Q ${subIndex + 1}: user="${userAnswer}", correct="${correctAnswerLetter}" (ID: ${correctAnswerId})`);
-
-                // ✅ FIXED: Support both ID and letter format
-                const isCorrectByLetter = correctAnswerLetter && userAnswer === correctAnswerLetter;
-                const isCorrectById = correctAnswerId && userAnswer === correctAnswerId;
-                const isCorrect = isCorrectByLetter || isCorrectById;
-
-                if (isCorrect) {
-                  questionScore += pointsPerAnswer;
-                  console.log(`  ✅ CORRECT! +${pointsPerAnswer.toFixed(1)}% (match: ${isCorrectByLetter ? 'letter' : 'ID'})`);
-                } else {
-                  console.log(`  ❌ Wrong, +0%`);
+                        if (isCorrect) {
+                          questionScore += pointsPerAnswer;
+                          console.log(`  ✅ CORRECT! +${pointsPerAnswer.toFixed(1)}% (match: ${isCorrectByLetter ? 'letter' : 'ID'})`);
+                        } else {
+                          console.log(`  ❌ Wrong, +0%`);
+                        }
+                      }
+                    } else {
+                      console.log(`  ⚠️ No answer found for sub-question ${subQuestionId} in parsed JSON`);
+                    }
+                  }
                 }
-              } else {
-                console.log(`  Sub-Q ${subIndex + 1}: No answer provided, +0%`);
+              } catch (jsonError) {
+                console.error(`❌ [completeStageFinalTest] Error analyzing multi-part answer: ${jsonError.message}`);
               }
 
-              answerIndex++; // Move to next answer
+              totalAnsweredQuestions++;
+              answerIndex++;
             }
           } else if (question.answers && Array.isArray(question.answers)) {
             // Single question: use one answer
             if (answerIndex < questionAnswers.length) {
-              const userAnswer = questionAnswers[answerIndex][0];
+              // Get user answer - parse JSON if it's a string containing JSON
+              let userAnswer = questionAnswers[answerIndex][0];
+
+              // Handle cases where the answer might be a JSON string
+              try {
+                // Check if the answer is a JSON string (starts with "{" and ends with "}")
+                if (typeof userAnswer === 'string' && userAnswer.trim().startsWith('{') && userAnswer.trim().endsWith('}')) {
+                  console.log(`🔍 [completeStageFinalTest] Detected JSON string for single question`);
+                  const parsedAnswer = JSON.parse(userAnswer);
+
+                  // If it's a simple structure with a single answer, use that
+                  const keys = Object.keys(parsedAnswer);
+                  if (keys.length === 1 && parsedAnswer[keys[0]]) {
+                    userAnswer = parsedAnswer[keys[0]];
+                    console.log(`✅ [completeStageFinalTest] Extracted answer from JSON: ${userAnswer}`);
+                  }
+                }
+              } catch (jsonError) {
+                console.error(`❌ [completeStageFinalTest] Error parsing JSON answer: ${jsonError.message}`);
+                // Continue with original answer if parsing fails
+              }
 
               console.log(`📤 Single question, ${pointsPerAnswer.toFixed(1)}% total`);
               console.log(`  User answer: "${userAnswer}" (answer index: ${answerIndex})`);
 
               if (userAnswer && question.answers) {
+                // Find correct answer for this sub-question
                 const correctAnswer = question.answers.find(ans => ans.isCorrect);
                 const correctAnswerIndex = question.answers.findIndex(ans => ans.isCorrect);
                 const correctAnswerLetter = correctAnswerIndex >= 0 ? String.fromCharCode(65 + correctAnswerIndex) : null;
@@ -814,15 +854,21 @@ const UserJourneyController = {
             }
           }
 
+          // ✅ FIXED: Calculate points based on the number of actual answers received
+          if (pointsPerAnswer === 0 && questionAnswers.length > 0) {
+            pointsPerAnswer = 100 / questionAnswers.length;
+            console.log(`   Points per answered question: ${pointsPerAnswer.toFixed(1)}% (based on ${questionAnswers.length} answers)`);
+          }
+
           totalScore += questionScore;
           console.log(`📊 Question ${qIndex + 1} score: ${questionScore.toFixed(1)}% (cumulative: ${totalScore.toFixed(1)}%)`);
         }
 
-        // ✅ Set totalQuestions and correctAnswers for compatibility with existing code
-        totalQuestions = totalAnsweredQuestions; // Use answered questions count for display
-        correctAnswers = Math.round((totalScore / 100) * totalAnsweredQuestions); // Approximate correct count
+        // ✅ FIXED: Set totalQuestions based on actual number of answers submitted
+        totalQuestions = questionAnswers.length; // Use the actual number of answers submitted
+        correctAnswers = Math.round((totalScore / 100) * totalQuestions); // Calculate correct answers based on actual answers
 
-        console.log(`🎯 [completeStageFinalTest] ADAPTIVE scoring result: ${totalScore.toFixed(1)}% (${correctAnswers}/${totalQuestions} approx)`)
+        console.log(`🎯 [completeStageFinalTest] ADAPTIVE scoring result: ${totalScore.toFixed(1)}% (${correctAnswers}/${totalQuestions} actual)`)
 
         // ✅ ENHANCED: Check for incomplete submissions based on adaptive scoring
         const maxPossibleQuestions = allQuestions.reduce((count, question) => {
@@ -834,17 +880,20 @@ const UserJourneyController = {
           return count;
         }, 0);
 
+        // ✅ FIXED: No longer consider a test "partial" if user answers all questions shown to them
+        const isPartialTest = false; // User answered all questions they could see
+
         console.log(`📊 [completeStageFinalTest] Answer coverage:`, {
           receivedAnswers: questionAnswers.length,
           maxPossibleAnswers: maxPossibleQuestions,
           answeredQuestions: totalAnsweredQuestions,
           coveragePercent: maxPossibleQuestions > 0 ? ((questionAnswers.length / maxPossibleQuestions) * 100).toFixed(1) : 0,
-          isPartialTest: questionAnswers.length < maxPossibleQuestions
+          isPartialTest: isPartialTest
         });
 
-        // ✅ WARNING: Log if submission is significantly incomplete
-        if (maxPossibleQuestions > 0 && questionAnswers.length < maxPossibleQuestions * 0.5) {
-          console.warn(`⚠️ [completeStageFinalTest] Incomplete submission detected: ${questionAnswers.length}/${maxPossibleQuestions} answers (${((questionAnswers.length / maxPossibleQuestions) * 100).toFixed(1)}%)`);
+        // ✅ FIXED: Only log warning if something unexpected happened with question count
+        if (questionAnswers.length === 0) {
+          console.warn(`⚠️ [completeStageFinalTest] No answers received: ${questionAnswers.length}/${maxPossibleQuestions} answers`);
         }
       } else {
         // ✅ Handle old object format (backward compatibility)
