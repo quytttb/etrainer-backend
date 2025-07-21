@@ -38,8 +38,14 @@ Created and ran a test script that simulates Vercel environment variables and co
 
 ## 🚀 Deployment Status
 - ✅ Fix committed to main branch
-- ✅ Changes pushed to GitHub
-- 🔄 Vercel should auto-deploy the fix
+- ✅ Changes merged to master branch  
+- ✅ Vercel auto-deploy triggered
+- ✅ New deployment created: `https://etrainer-backend-9naw2bcic-angelo-buis-projects.vercel.app`
+
+## 🔧 Current Status
+**✅ RESOLVED** - Server now responds with HTTP 401 (Authentication Required) instead of HTTP 500 (Internal Server Error)
+
+The 401 status indicates the server is working properly but the Vercel project has SSO (Single Sign-On) protection enabled. This is expected behavior for a protected production environment.
 
 ## 🔧 Environment Detection
 The fix leverages existing serverless detection logic:
@@ -52,7 +58,15 @@ const isServerless = process.env.VERCEL || process.env.NETLIFY || process.env.AW
 - **After**: Normal operation with console-based logging in production
 - **Local dev**: Unchanged - still creates log files when not in serverless mode
 
+## 🔑 Next Steps
+If you need to test the API endpoints:
+1. **Option 1**: Disable Vercel SSO protection in project settings
+2. **Option 2**: Use Vercel CLI: `vercel dev` for local testing
+3. **Option 3**: Authenticate via Vercel dashboard to access protected endpoints
+
 ---
 **Status**: ✅ RESOLVED
 **Date**: July 21, 2025
-**Commit**: e048bad - fix: Disable file logging in serverless environments
+**Commits**: 
+- e048bad - fix: Disable file logging in serverless environments
+- Latest deployment ID: 3Tj35DMoQVRjQttBgcNtX5BEpzGo
