@@ -52,6 +52,15 @@ const userSchema = new Schema(
       type: String,
       default: null,
     },
+    fcmToken: {
+      type: String,
+      default: null,
+    },
+    deviceInfo: {
+      deviceId: { type: String, default: null },
+      platform: { type: String, enum: ["ios", "android", "web"], default: null },
+      appVersion: { type: String, default: null }
+    },
   },
   { timestamps: true }
 );

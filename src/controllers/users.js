@@ -127,6 +127,64 @@ const UserController = {
       });
     }
   },
+
+  // New Flutter-specific endpoints
+  saveFCMToken: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { fcmToken, deviceInfo } = req.body;
+
+      if (!fcmToken) {
+        return res.status(400).json({ message: "fcmToken is required" });
+      }
+
+      const updateData = { fcmToken };
+      if (deviceInfo) {
+        updateData.deviceInfo = deviceInfo;
+      }
+
+      const user = await User.findByIdAndUpdate(
+        userId,
+        updateData,
+        { new: true }
+      ).exec();
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({ message: "FCM token saved successfully", fcmToken });
+    } catch (error) {
+      res.status(500).json({
+        message: "Internal server error",
+        error,
+      });
+    }
+  },
+
+  updateDeviceInfo: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { deviceInfo } = req.body;
+
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { deviceInfo },
+        { new: true }
+      ).exec();
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({ message: "Device info updated successfully", deviceInfo });
+    } catch (error) {
+      res.status(500).json({
+        message: "Internal server error",
+        error,
+      });
+    }
+  },
 };
 
 module.exports = UserController;

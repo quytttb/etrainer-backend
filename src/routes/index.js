@@ -15,6 +15,8 @@ const userJourneyRouter = require("./userJourney");
 const favoriteRouter = require("./favorites");
 const statsRoutes = require("./stats");
 const migrationRouter = require("./migration");
+const systemRouter = require("./system");
+const uploadRouter = require("./upload");
 
 const router = express.Router();
 
@@ -34,6 +36,8 @@ router.use("/journeys", userJourneyRouter);
 router.use("/favorites", favoriteRouter);
 router.use("/stats", statsRoutes);
 router.use("/migration", migrationRouter);
+router.use("/system", systemRouter);
+router.use("/uploads", uploadRouter);
 
 
 module.exports = router;

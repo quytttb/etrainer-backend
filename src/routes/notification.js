@@ -10,4 +10,16 @@ notificationRouter.get(
   NotificationController.getAllNotifications
 );
 
+notificationRouter.post(
+  "/",
+  checkLogin,
+  NotificationController.createNotification
+);
+
+notificationRouter.post(
+  "/send-push",
+  checkLogin,
+  NotificationController.sendPushNotification
+);
+
 module.exports = notificationRouter;

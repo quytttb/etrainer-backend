@@ -7,7 +7,7 @@ const User = require("./models/users");
 const PracticeHistory = require("./models/practiceHistory");
 const ExamHistory = require("./models/examHistory");
 
-cron.schedule("* * * * *", async () => {
+cron.schedule("*/10 * * * *", async () => {
   const now = dayjs();
   const currentHour = now.hour();
   const currentMinute = now.minute();
@@ -39,7 +39,7 @@ cron.schedule("* * * * *", async () => {
 });
 
 // Cron job: Nhắc nhở học tập nếu không hoạt động > 7 ngày
-cron.schedule("* * * * *", async () => {
+cron.schedule("*/10 * * * *", async () => {
   const now = dayjs();
   // const sevenDaysAgo = now.subtract(5, "minute");
   const sevenDaysAgo = now.subtract(7, "day");

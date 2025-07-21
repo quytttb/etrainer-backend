@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  # Load balancer (Nginx)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app1
+      - app2
+      - app3
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+
+  # Application instances
+  app1:
+    build: .
+    environment:
+      - NODE_ENV=production
+      - ENABLE_CLUSTERING=false
+      - WORKER_ID=app1
+      - MONGODB_URI=mongodb://mongo:27017/etrainer
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+    volumes:
+      - ./logs:/app/logs
+
+  app2:
+    build: .
+    environment:
+      - NODE_ENV=production
+      - ENABLE_CLUSTERING=false
+      - WORKER_ID=app2
+      - MONGODB_URI=mongodb://mongo:27017/etrainer
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+    volumes:
+      - ./logs:/app/logs
+
+  app3:
+    build: .
+    environment:
+      - NODE_ENV=production
+      - ENABLE_CLUSTERING=false
+      - WORKER_ID=app3
+      - MONGODB_URI=mongodb://mongo:27017/etrainer
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+    volumes:
+      - ./logs:/app/logs
+
+  # MongoDB
+  mongo:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: etrainer_admin
+      MONGO_INITDB_ROOT_PASSWORD: secure_password_here
+      MONGO_INITDB_DATABASE: etrainer
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+    command: mongod --replSet rs0 --bind_ip_all
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass secure_redis_password
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+
+  # MongoDB monitoring
+  mongo-express:
+    image: mongo-express
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: etrainer_admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: secure_password_here
+      ME_CONFIG_MONGODB_URL: mongodb://etrainer_admin:secure_password_here@mongo:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+    depends_on:
+      - mongo
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+
+  # Redis monitoring
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:secure_redis_password
+      HTTP_USER: admin
+      HTTP_PASSWORD: admin123
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - etrainer-network
+
+volumes:
+  mongo-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  etrainer-network:
+    driver: bridge

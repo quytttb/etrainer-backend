@@ -2,10 +2,14 @@ const express = require("express");
 const ExamController = require("../controllers/exam");
 const { checkLogin, isAdmin } = require("../middlewares/auth");
 const ExamHistoryController = require("../controllers/examHistory");
+const { validate, schemas, sanitizeInput } = require("../middlewares/validation");
 
 const examRouter = express.Router();
 
-examRouter.post("/submit", checkLogin, ExamHistoryController.createExamHistory);
+// Apply input sanitization to all exam routes
+examRouter.use(sanitizeInput);
+
+examRouter.post("/submit", checkLogin, validate(schemas.examSubmission), ExamHistoryController.createExamHistory);
 examRouter.get("/result/:id", checkLogin, ExamHistoryController.getExamHistory);
 examRouter.get("/", checkLogin, ExamController.getAll);
 examRouter.get("/:id", checkLogin, ExamController.getById);

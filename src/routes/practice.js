@@ -1,10 +1,14 @@
 const express = require("express");
 const { checkLogin, isAdmin } = require("../middlewares/auth");
 const PracticeController = require("../controllers/practice");
+const { validate, schemas, sanitizeInput } = require("../middlewares/validation");
 
 const practiceRouter = express.Router();
 
-practiceRouter.post("/submit", checkLogin, PracticeController.submitPractice);
+// Apply input sanitization to all practice routes
+practiceRouter.use(sanitizeInput);
+
+practiceRouter.post("/submit", checkLogin, validate(schemas.practiceSubmission), PracticeController.submitPractice);
 practiceRouter.post("/start", checkLogin, PracticeController.startPractice);
 practiceRouter.get(
   "/history",
