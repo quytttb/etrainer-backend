@@ -1,6 +1,5 @@
 const serverlessDB = require('../configs/serverlessDB');
 const { isServerless } = require('../configs/serverless');
-const logger = require('../utils/logger');
 
 /**
  * Middleware to ensure database connection in serverless environment
@@ -16,7 +15,7 @@ const ensureDbConnection = async (req, res, next) => {
     await serverlessDB.connect();
     next();
   } catch (error) {
-    logger.error('❌ Database connection failed in middleware:', error.message);
+    console.error('❌ Database connection failed in middleware:', error.message);
     res.status(503).json({
       error: 'Database connection failed',
       message: 'Service temporarily unavailable. Please try again.'

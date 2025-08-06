@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const logger = require('../utils/logger');
 
 class ServerlessDBManager {
   constructor() {
@@ -26,6 +25,7 @@ class ServerlessDBManager {
   async createConnection() {
     try {
       if (!process.env.MONGODB_URI) {
+        console.error('❌ MONGODB_URI environment variable is not defined');
         throw new Error('MONGODB_URI environment variable is not defined');
       }
 
@@ -45,24 +45,24 @@ class ServerlessDBManager {
         writeConcern: { w: 'majority', j: true },
       };
 
-      logger.info('🔌 Connecting to MongoDB...');
+      console.log('🔌 Connecting to MongoDB...');
       
       if (mongoose.connection.readyState === 0) {
         await mongoose.connect(process.env.MONGODB_URI, options);
       }
 
       this.isConnected = true;
-      logger.info('✅ MongoDB connected successfully');
+      console.log('✅ MongoDB connected successfully');
 
       // Set up event listeners
       mongoose.connection.on('error', (err) => {
-        logger.error('❌ MongoDB connection error:', err.message);
+        console.error('❌ MongoDB connection error:', err.message);
         this.isConnected = false;
         this.connectionPromise = null;
       });
 
       mongoose.connection.on('disconnected', () => {
-        logger.warn('⚠️ MongoDB disconnected');
+        console.warn('⚠️ MongoDB disconnected');
         this.isConnected = false;
         this.connectionPromise = null;
       });
@@ -70,7 +70,7 @@ class ServerlessDBManager {
       return mongoose.connection;
 
     } catch (error) {
-      logger.error('❌ MongoDB connection failed:', error.message);
+      console.error('❌ MongoDB connection failed:', error.message);
       this.isConnected = false;
       this.connectionPromise = null;
       throw error;
@@ -87,7 +87,7 @@ class ServerlessDBManager {
         return;
       } catch (error) {
         attempts++;
-        logger.warn(`🔄 Connection attempt ${attempts}/${maxRetries} failed:`, error.message);
+        console.warn(`🔄 Connection attempt ${attempts}/${maxRetries} failed:`, error.message);
         
         if (attempts < maxRetries) {
           const delay = Math.min(1000 * Math.pow(2, attempts), 5000); // Exponential backoff
