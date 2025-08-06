@@ -1,13 +1,15 @@
 const { default: mongoose } = require("mongoose");
 
-// Connection options for production optimization
+// Connection options optimized for serverless environment
 const mongooseOptions = {
-  maxPoolSize: 10, // Maintain up to 10 socket connections
-  serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+  maxPoolSize: 5, // Reduce pool size for serverless
+  serverSelectionTimeoutMS: 30000, // Increase timeout for serverless cold starts
   socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-  // bufferMaxEntries: 0, // Deprecated option - removed
-  bufferCommands: false, // Disable mongoose buffering
+  connectTimeoutMS: 30000, // Connection timeout
+  bufferCommands: true, // Enable buffering for serverless compatibility
+  bufferMaxEntries: 0, // Disable buffer limit
   retryWrites: true,
+  heartbeatFrequencyMS: 30000, // Increase heartbeat frequency
 };
 
 const connectDB = async (retries = 5) => {

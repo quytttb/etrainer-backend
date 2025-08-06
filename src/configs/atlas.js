@@ -32,16 +32,19 @@ class AtlasConnectionManager {
   }
 
   getOptimizedOptions() {
+    const isServerless = process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME;
+    
     return {
-      // Connection Pool Settings
-      maxPoolSize: parseInt(process.env.MONGODB_MAX_POOL_SIZE) || 20,
-      minPoolSize: parseInt(process.env.MONGODB_MIN_POOL_SIZE) || 5,
+      // Connection Pool Settings - optimized for serverless
+      maxPoolSize: isServerless ? 5 : parseInt(process.env.MONGODB_MAX_POOL_SIZE) || 20,
+      minPoolSize: isServerless ? 1 : parseInt(process.env.MONGODB_MIN_POOL_SIZE) || 5,
       maxIdleTimeMS: 30000,
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: isServerless ? 30000 : 5000, // Increase for serverless
       socketTimeoutMS: 45000,
+      connectTimeoutMS: isServerless ? 30000 : 10000, // Add connection timeout
 
       // Heartbeat Settings
-      heartbeatFrequencyMS: 10000,
+      heartbeatFrequencyMS: isServerless ? 30000 : 10000, // Reduce frequency for serverless
 
       // Write Concern
       writeConcern: {
@@ -54,9 +57,9 @@ class AtlasConnectionManager {
       readPreference: 'secondaryPreferred',
       readConcern: { level: 'majority' },
 
-      // Buffer Settings
+      // Buffer Settings - enable for serverless compatibility
       bufferMaxEntries: 0,
-      bufferCommands: false,
+      bufferCommands: isServerless ? true : false, // Enable buffering for serverless
 
       // Compression
       compressors: ['snappy', 'zlib'],

@@ -6,6 +6,7 @@ const rateLimit = require("express-rate-limit");
 const compression = require("compression");
 const connectDB = require("./configs/db");
 const atlasManager = require("./configs/atlas");
+const serverlessDB = require("./configs/serverlessDB");
 const { initializeFirebase } = require("./configs/firebase");
 const cloudinaryManager = require("./configs/cloudinary");
 const jobScheduler = require("./configs/jobScheduler");
@@ -13,6 +14,7 @@ const router = require("./routes");
 const { sanitizeInput } = require("./middlewares/validation");
 const { logRateLimitHit } = require("./middlewares/security");
 const { performanceMonitor } = require("./middlewares/performance");
+const { ensureDbConnection } = require("./middlewares/database");
 const { cache } = require("./configs/cache");
 const dbOptimization = require("./utils/dbOptimization");
 const logger = require("./utils/logger");
@@ -111,18 +113,25 @@ app.use(
 // Initialize services
 async function initializeServices() {
   try {
-    // Database connection (try Atlas first, fallback to local)
-    if (process.env.MONGODB_ATLAS_URI || process.env.MONGODB_ATLAS_CLUSTER) {
-      logger.info('🌍 Attempting MongoDB Atlas connection...');
-      try {
-        await atlasManager.connect();
-        logger.info('✅ Connected to MongoDB Atlas');
-      } catch (atlasError) {
-        logger.warn('⚠️ Atlas connection failed, falling back to local MongoDB:', atlasError.message);
+    // Database connection - use serverless manager for better compatibility
+    if (isServerless) {
+      logger.info('🔧 Using serverless database manager...');
+      await serverlessDB.ensureConnection();
+      logger.info('✅ Serverless database connected');
+    } else {
+      // Traditional environment - try Atlas first, fallback to local
+      if (process.env.MONGODB_ATLAS_URI || process.env.MONGODB_ATLAS_CLUSTER) {
+        logger.info('🌍 Attempting MongoDB Atlas connection...');
+        try {
+          await atlasManager.connect();
+          logger.info('✅ Connected to MongoDB Atlas');
+        } catch (atlasError) {
+          logger.warn('⚠️ Atlas connection failed, falling back to local MongoDB:', atlasError.message);
+          connectDB();
+        }
+      } else {
         connectDB();
       }
-    } else {
-      connectDB();
     }
 
     // Initialize Firebase
@@ -160,8 +169,13 @@ app.get("/", (req, res) => {
 
 app.get("/health", async (req, res) => {
   try {
+    // Get database stats - use serverless manager in serverless environment
+    const dbStats = isServerless ? 
+      serverlessDB.getConnectionStatus() : 
+      dbOptimization.getConnectionStats();
+
     const healthChecks = [
-      dbOptimization.getConnectionStats(),
+      Promise.resolve(dbStats),
       cache.getStats()
     ];
 
@@ -175,7 +189,7 @@ app.get("/health", async (req, res) => {
       healthChecks.push(cloudinaryManager.healthCheck().catch(() => ({ status: 'error' })));
     }
 
-    const [dbStats, cacheStats, jobStats, cloudinaryHealth] = await Promise.all(healthChecks);
+    const [finalDbStats, cacheStats, jobStats, cloudinaryHealth] = await Promise.all(healthChecks);
 
     res.json({
       status: "OK",
@@ -184,7 +198,7 @@ app.get("/health", async (req, res) => {
       timestamp: new Date().toISOString(),
       environment: isServerless ? 'serverless' : 'traditional',
       services: {
-        database: dbStats,
+        database: finalDbStats,
         cache: cacheStats,
         jobScheduler: !isServerless ? jobStats : { status: 'disabled', reason: 'serverless' },
         cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? cloudinaryHealth : { status: 'not_configured' }
@@ -211,6 +225,10 @@ app.get("/health", async (req, res) => {
 
 // Apply auth rate limiter to auth routes
 app.use("/api/auth", authLimiter);
+
+// Apply database connection middleware to all API routes
+app.use("/api", ensureDbConnection);
+
 app.use("/api", router);
 
 // Global error handler
