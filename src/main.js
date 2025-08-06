@@ -113,11 +113,19 @@ app.use(
 // Initialize services
 async function initializeServices() {
   try {
-    // Database connection - use serverless manager for better compatibility
+    // Database connection - simplified for serverless
     if (isServerless) {
-      logger.info('🔧 Using serverless database manager...');
-      await serverlessDB.ensureConnection();
-      logger.info('✅ Serverless database connected');
+      logger.info('🔧 Serverless environment - using direct connection...');
+      if (process.env.MONGODB_URI) {
+        try {
+          await connectDB();
+          logger.info('✅ Direct MongoDB connection established');
+        } catch (dbError) {
+          logger.warn('⚠️ MongoDB connection failed:', dbError.message);
+        }
+      } else {
+        logger.warn('⚠️ MONGODB_URI not found in environment');
+      }
     } else {
       // Traditional environment - try Atlas first, fallback to local
       if (process.env.MONGODB_ATLAS_URI || process.env.MONGODB_ATLAS_CLUSTER) {
