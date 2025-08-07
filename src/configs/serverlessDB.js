@@ -46,7 +46,7 @@ class ServerlessDBManager {
       };
 
       console.log('🔌 Connecting to MongoDB...');
-      
+
       if (mongoose.connection.readyState === 0) {
         await mongoose.connect(process.env.MONGODB_URI, options);
       }
@@ -88,7 +88,7 @@ class ServerlessDBManager {
       } catch (error) {
         attempts++;
         console.warn(`🔄 Connection attempt ${attempts}/${maxRetries} failed:`, error.message);
-        
+
         if (attempts < maxRetries) {
           const delay = Math.min(1000 * Math.pow(2, attempts), 5000); // Exponential backoff
           await new Promise(resolve => setTimeout(resolve, delay));

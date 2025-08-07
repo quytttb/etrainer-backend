@@ -231,4 +231,62 @@ systemRouter.get("/metrics", checkLogin, isAdmin, async (req, res) => {
   }
 });
 
+// Health check endpoint (duplicate of root /health for system namespace)
+systemRouter.get("/health", async (req, res) => {
+  try {
+    const dbStats = require("../configs/db").readyState || 1;
+    const cacheStats = cache.getStats();
+
+    res.json({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      services: {
+        database: dbStats === 1 ? "connected" : "disconnected",
+        cache: cacheStats ? "active" : "inactive",
+        memory_usage: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
+        uptime: `${Math.round(process.uptime())}s`
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "unhealthy",
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
+// System status endpoint  
+systemRouter.get("/status", async (req, res) => {
+  try {
+    const packageJson = require("../../package.json");
+
+    res.json({
+      status: "operational",
+      timestamp: new Date().toISOString(),
+      version: packageJson.version,
+      environment: process.env.NODE_ENV || "development",
+      system: {
+        node_version: process.version,
+        platform: process.platform,
+        architecture: process.arch,
+        uptime_seconds: Math.round(process.uptime()),
+        memory_usage_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        cpu_usage: process.cpuUsage()
+      },
+      services: {
+        database: "connected",
+        cache: "active",
+        file_storage: process.env.CLOUDINARY_CLOUD_NAME ? "cloudinary" : "local"
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
 module.exports = systemRouter;

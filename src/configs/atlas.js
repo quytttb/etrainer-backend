@@ -36,7 +36,7 @@ class AtlasConnectionManager {
 
   getOptimizedOptions() {
     const isServerless = process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME;
-    
+
     return {
       // Connection Pool Settings - optimized for serverless
       maxPoolSize: isServerless ? 5 : parseInt(process.env.MONGODB_MAX_POOL_SIZE) || 20,

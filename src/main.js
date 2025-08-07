@@ -178,8 +178,8 @@ app.get("/", (req, res) => {
 app.get("/health", async (req, res) => {
   try {
     // Get database stats - use serverless manager in serverless environment
-    const dbStats = isServerless ? 
-      serverlessDB.getConnectionStatus() : 
+    const dbStats = isServerless ?
+      serverlessDB.getConnectionStatus() :
       dbOptimization.getConnectionStats();
 
     const healthChecks = [

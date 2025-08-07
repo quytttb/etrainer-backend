@@ -21,8 +21,9 @@ const AuthController = {
       const user = await User.findOne({ email: data.email }).exec();
       if (user) {
         const token = AuthController.generateAccessToken(user);
+        const refreshToken = AuthController.generateRefreshToken(user);
 
-        res.json({ token });
+        res.json({ token, refreshToken });
       } else {
         const userCount = await User.countDocuments();
         const role = userCount > 0 ? "USER" : "ADMIN";
@@ -37,8 +38,9 @@ const AuthController = {
         await newUser.save();
 
         const token = AuthController.generateAccessToken(newUser);
+        const refreshToken = AuthController.generateRefreshToken(newUser);
 
-        res.json({ token });
+        res.json({ token, refreshToken });
       }
     } catch (error) {
       console.log("🚀 352 ~ googleSignIn: ~ error:", error);
@@ -55,6 +57,17 @@ const AuthController = {
       },
       process.env.JWT_SECRET_KEY,
       { expiresIn: "1h" }
+    );
+  },
+
+  generateRefreshToken: (user) => {
+    return jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+      },
+      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET_KEY,
+      { expiresIn: "7d" }
     );
   },
 
@@ -133,6 +146,7 @@ const AuthController = {
       }
 
       const token = AuthController.generateAccessToken(findUser);
+      const refreshToken = AuthController.generateRefreshToken(findUser);
 
       // Return user object without password for security  
       const userResponse = findUser.toObject();
@@ -140,12 +154,73 @@ const AuthController = {
 
       res.json({
         token,
+        refreshToken,
         user: userResponse,
         isAdmin: findUser.role === "ADMIN",
       });
     } catch (error) {
       res.status(500).json({
         error: error.message,
+      });
+    }
+  },
+
+  refreshToken: async (req, res) => {
+    try {
+      const { refreshToken } = req.body;
+
+      if (!refreshToken) {
+        return res.status(400).json({
+          error: "Refresh token is required"
+        });
+      }
+
+      // Verify refresh token
+      const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET_KEY);
+
+      // Find user
+      const user = await User.findById(decoded.id).exec();
+      if (!user) {
+        return res.status(401).json({
+          error: "Invalid refresh token"
+        });
+      }
+
+      // Generate new tokens
+      const newAccessToken = AuthController.generateAccessToken(user);
+      const newRefreshToken = AuthController.generateRefreshToken(user);
+
+      res.json({
+        token: newAccessToken,
+        refreshToken: newRefreshToken
+      });
+
+    } catch (error) {
+      if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          error: "Invalid or expired refresh token"
+        });
+      }
+
+      res.status(500).json({
+        error: error.message
+      });
+    }
+  },
+
+  logout: async (req, res) => {
+    try {
+      // In a production environment, you would:
+      // 1. Add the token to a blacklist/redis cache
+      // 2. Or invalidate the token in the database
+      // For now, we'll just return success (client-side logout)
+
+      res.json({
+        message: "Logged out successfully"
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: error.message
       });
     }
   },
