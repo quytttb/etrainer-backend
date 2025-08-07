@@ -122,9 +122,25 @@ const AuthController = {
       console.log('🔌 Mongoose connection state:', mongoose.connection.readyState);
       console.log('🔧 Global bufferCommands setting:', mongoose.get('bufferCommands'));
       
-      // Force set bufferCommands to true for this request
-      mongoose.set('bufferCommands', true);
-      console.log('🔧 After setting bufferCommands:', mongoose.get('bufferCommands'));
+      // Force manual connection if needed
+      if (mongoose.connection.readyState !== 1) {
+        console.log('🔧 Manually connecting to MongoDB...');
+        
+        if (!process.env.MONGODB_URI) {
+          throw new Error('MONGODB_URI not found');
+        }
+        
+        await mongoose.connect(process.env.MONGODB_URI, {
+          maxPoolSize: 3,
+          serverSelectionTimeoutMS: 10000,
+          socketTimeoutMS: 30000,
+          connectTimeoutMS: 10000,
+          bufferCommands: true,
+          retryWrites: true,
+        });
+        
+        console.log('🔧 Manual connection established');
+      }
       
       // check email registered
       console.log('🔍 Attempting to find user...');
