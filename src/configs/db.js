@@ -6,7 +6,7 @@ const mongooseOptions = {
   serverSelectionTimeoutMS: 10000, // Reduce timeout for faster fail
   socketTimeoutMS: 30000, // Reduce socket timeout
   connectTimeoutMS: 10000, // Reduce connection timeout
-  bufferCommands: false, // Disable buffering for immediate errors
+  bufferCommands: true, // Enable buffering to avoid connection issues
   retryWrites: true,
 };
 
