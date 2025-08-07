@@ -21,6 +21,10 @@ const logger = require("./utils/logger");
 const { isServerless } = require("./configs/serverless");
 require("dotenv").config();
 
+// Debug mongoose configuration
+const mongoose = require('mongoose');
+console.log('🔧 Mongoose default bufferCommands:', mongoose.get('bufferCommands'));
+
 const app = express();
 
 // 🔒 Security middleware
