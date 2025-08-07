@@ -238,8 +238,8 @@ app.get("/health", async (req, res) => {
 // Apply auth rate limiter to auth routes
 app.use("/api/auth", authLimiter);
 
-// Apply database connection middleware to all API routes
-app.use("/api", ensureDbConnection);
+// Skip database connection middleware for auth routes to handle manually
+// app.use("/api", ensureDbConnection);
 
 app.use("/api", router);
 
