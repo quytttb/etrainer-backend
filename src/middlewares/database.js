@@ -6,27 +6,26 @@ const { connectDB } = require('../configs/db');
  */
 const ensureDbConnection = async (req, res, next) => {
   try {
-    // Check if already connected
-    if (mongoose.connection.readyState === 1) {
-      return next();
-    }
+    console.log('🔧 DB Middleware - connection state:', mongoose.connection.readyState);
     
-    // If not connected, connect now
-    if (mongoose.connection.readyState === 0) {
+    // Always force connection for every request in serverless
+    if (mongoose.connection.readyState !== 1) {
+      console.log('🔧 DB Middleware - forcing new connection...');
       await connectDB();
+      
+      // Wait a bit for connection to be ready
+      let retries = 10;
+      while (mongoose.connection.readyState !== 1 && retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        retries--;
+      }
+      
+      if (mongoose.connection.readyState !== 1) {
+        throw new Error('Failed to establish database connection');
+      }
     }
     
-    // Wait for connection to be ready if still connecting
-    if (mongoose.connection.readyState === 2) {
-      await new Promise((resolve, reject) => {
-        mongoose.connection.once('connected', resolve);
-        mongoose.connection.once('error', reject);
-        
-        // Timeout after 10 seconds
-        setTimeout(() => reject(new Error('Database connection timeout')), 10000);
-      });
-    }
-    
+    console.log('🔧 DB Middleware - connection ready');
     next();
   } catch (error) {
     console.error('Database connection error:', error);
