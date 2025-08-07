@@ -2,6 +2,7 @@ const { default: axios } = require("axios");
 const User = require("../models/users");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const mongoose = require("mongoose");
 
 const AuthController = {
   googleSignIn: async (req, res) => {
@@ -117,20 +118,29 @@ const AuthController = {
     const { email, password } = req.body;
 
     try {
+      console.log('🔍 SignIn attempt for email:', email);
+      console.log('🔌 Mongoose connection state:', mongoose.connection.readyState);
+      
       // check email registered
+      console.log('🔍 Attempting to find user...');
       const findUser = await User.findOne({ email }).exec();
+      console.log('🔍 User query result:', findUser ? 'Found' : 'Not found');
 
       if (!findUser) {
+        console.log('❌ User not found for email:', email);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
       // check password
+      console.log('🔍 Comparing password...');
       const isPasswordValid = await bcrypt.compare(password, findUser.password);
 
       if (!isPasswordValid) {
+        console.log('❌ Invalid password for email:', email);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      console.log('✅ Authentication successful for:', email);
       const token = AuthController.generateAccessToken(findUser);
 
       // Return user object without password for security  
@@ -143,6 +153,7 @@ const AuthController = {
         isAdmin: findUser.role === "ADMIN",
       });
     } catch (error) {
+      console.error('🚨 SignIn error:', error);
       res.status(500).json({
         error: error.message,
       });
