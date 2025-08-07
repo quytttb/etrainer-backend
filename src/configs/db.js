@@ -40,8 +40,13 @@ const connectDB = async (retries = 5) => {
       await new Promise(resolve => setTimeout(resolve, 5000));
       return connectDB(retries - 1);
     } else {
-      console.error("🚨 Failed to connect to MongoDB after 5 attempts. Exiting...");
-      process.exit(1);
+      console.error("🚨 Failed to connect to MongoDB after 5 attempts.");
+      // Don't exit in serverless environment - throw error instead
+      if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+        throw new Error('MongoDB connection failed after 5 attempts');
+      } else {
+        process.exit(1);
+      }
     }
   }
 };
