@@ -21,10 +21,6 @@ const logger = require("./utils/logger");
 const { isServerless } = require("./configs/serverless");
 require("dotenv").config();
 
-// Debug mongoose configuration
-const mongoose = require('mongoose');
-console.log('🔧 Mongoose default bufferCommands:', mongoose.get('bufferCommands'));
-
 const app = express();
 
 // 🔒 Security middleware
@@ -238,8 +234,8 @@ app.get("/health", async (req, res) => {
 // Apply auth rate limiter to auth routes
 app.use("/api/auth", authLimiter);
 
-// Skip database connection middleware for auth routes to handle manually
-// app.use("/api", ensureDbConnection);
+// Apply database connection middleware to all API routes
+app.use("/api", ensureDbConnection);
 
 app.use("/api", router);
 
