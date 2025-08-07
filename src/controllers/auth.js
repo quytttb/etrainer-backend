@@ -141,23 +141,17 @@ const AuthController = {
         console.log('🔧 Manual connection established');
       }
       
-      // Create User model with explicit bufferCommands: true
-      const UserSchema = new mongoose.Schema({
-        name: { type: String, required: true },
-        email: { type: String, required: true, unique: true },
-        password: { type: String },
-        role: { type: String },
-        registrationMethod: { type: String }
-      }, { 
-        timestamps: true,
-        bufferCommands: true 
-      });
+      // Use original User model but force bufferCommands at query level
+      const UserModel = User;
       
-      const UserModel = mongoose.models.users || mongoose.model('users', UserSchema);
+      // Force set schema bufferCommands if possible
+      if (UserModel.schema) {
+        UserModel.schema.set('bufferCommands', true);
+      }
       
       // check email registered
       console.log('🔍 Attempting to find user...');
-      const findUser = await UserModel.findOne({ email }).exec();
+      const findUser = await UserModel.findOne({ email }).setOptions({ bufferCommands: true }).exec();
       console.log('🔍 User query result:', findUser ? 'Found' : 'Not found');
 
       if (!findUser) {
