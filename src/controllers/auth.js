@@ -120,6 +120,11 @@ const AuthController = {
     try {
       console.log('🔍 SignIn attempt for email:', email);
       console.log('🔌 Mongoose connection state:', mongoose.connection.readyState);
+      console.log('🔧 Global bufferCommands setting:', mongoose.get('bufferCommands'));
+      
+      // Force set bufferCommands to true for this request
+      mongoose.set('bufferCommands', true);
+      console.log('🔧 After setting bufferCommands:', mongoose.get('bufferCommands'));
       
       // check email registered
       console.log('🔍 Attempting to find user...');
