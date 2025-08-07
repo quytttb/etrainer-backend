@@ -1,5 +1,3 @@
-const serverlessDB = require('../configs/serverlessDB');
-const { isServerless } = require('../configs/serverless');
 const mongoose = require('mongoose');
 
 /**
@@ -12,15 +10,15 @@ const ensureDbConnection = async (req, res, next) => {
       return next();
     }
     
-    // If not connected, wait for connection
+    // If not connected, connect now
     if (mongoose.connection.readyState === 0) {
-      // Import and connect if needed
+      // Import connectDB function and call it
       const connectDB = require('../configs/db');
       await connectDB();
     }
     
-    // Wait for connection to be ready
-    if (mongoose.connection.readyState !== 1) {
+    // Wait for connection to be ready if still connecting
+    if (mongoose.connection.readyState === 2) {
       await new Promise((resolve, reject) => {
         mongoose.connection.once('connected', resolve);
         mongoose.connection.once('error', reject);
