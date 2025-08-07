@@ -59,7 +59,7 @@ class AtlasConnectionManager {
 
       // Buffer Settings - enable for serverless compatibility
       bufferMaxEntries: 0,
-      bufferCommands: isServerless ? true : false, // Enable buffering for serverless
+      bufferCommands: true, // Enable buffering for serverless
 
       // Compression
       compressors: ['snappy', 'zlib'],
