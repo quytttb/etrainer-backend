@@ -17,6 +17,7 @@ const statsRoutes = require("./stats");
 const migrationRouter = require("./migration");
 const systemRouter = require("./system");
 const uploadRouter = require("./upload");
+const debugRouter = require("./debug");
 
 const router = express.Router();
 
@@ -38,6 +39,7 @@ router.use("/stats", statsRoutes);
 router.use("/migration", migrationRouter);
 router.use("/system", systemRouter);
 router.use("/uploads", uploadRouter);
+router.use("/debug", debugRouter);
 
 
 module.exports = router;
