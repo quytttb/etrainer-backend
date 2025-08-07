@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { connectDB } = require('../configs/db');
 
 /**
  * Middleware to ensure database connection in serverless environment
@@ -12,8 +13,6 @@ const ensureDbConnection = async (req, res, next) => {
     
     // If not connected, connect now
     if (mongoose.connection.readyState === 0) {
-      // Import connectDB function and call it
-      const connectDB = require('../configs/db');
       await connectDB();
     }
     

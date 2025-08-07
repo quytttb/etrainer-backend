@@ -67,3 +67,4 @@ process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
 
 module.exports = connectDB;
+module.exports.connectDB = connectDB;
