@@ -1,5 +1,8 @@
 const { default: mongoose } = require("mongoose");
 
+// Force set global default for bufferCommands
+mongoose.set('bufferCommands', true);
+
 // Connection options optimized for serverless environment
 const mongooseOptions = {
   maxPoolSize: 3, // Further reduce pool size for serverless

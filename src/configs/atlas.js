@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
+// Force set global default for bufferCommands
+mongoose.set('bufferCommands', true);
+
 class AtlasConnectionManager {
   constructor() {
     this.isConnected = false;
