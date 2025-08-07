@@ -1,10 +1,10 @@
 # MongoDB URI Fixed cho Vercel Serverless
 
-## URI gốc (có vấn đề):
-mongodb+srv://touyen:touyen@danentang.ilfodv9.mongodb.net/etrainer
+## ✅ URI cluster mới (đã migrate data):
+mongodb+srv://etrainer_user:user%401234@cluster0.lo5cyua.mongodb.net/etrainer?retryWrites=true&w=majority&serverSelectionTimeoutMS=30000&socketTimeoutMS=45000&connectTimeoutMS=30000&maxPoolSize=5&minPoolSize=1&appName=Cluster0
 
-## URI đã fix (khuyến nghị):
-mongodb+srv://touyen:touyen@danentang.ilfodv9.mongodb.net/etrainer?retryWrites=true&w=majority&serverSelectionTimeoutMS=30000&socketTimeoutMS=45000&connectTimeoutMS=30000&maxPoolSize=5&minPoolSize=1
+## URI cũ (deprecated - không sử dụng):
+mongodb+srv://touyen:touyen@danentang.ilfodv9.mongodb.net/etrainer
 
 ## Giải thích các parameters:
 - retryWrites=true: Enable retry cho write operations

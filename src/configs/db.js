@@ -7,7 +7,6 @@ const mongooseOptions = {
   socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
   connectTimeoutMS: 30000, // Connection timeout
   bufferCommands: true, // Enable buffering for serverless compatibility
-  bufferMaxEntries: 0, // Disable buffer limit
   retryWrites: true,
   heartbeatFrequencyMS: 30000, // Increase heartbeat frequency
 };
