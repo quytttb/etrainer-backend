@@ -120,7 +120,6 @@ const AuthController = {
     try {
       console.log('🔍 SignIn attempt for email:', email);
       console.log('🔌 Mongoose connection state:', mongoose.connection.readyState);
-      console.log('🔧 Global bufferCommands setting:', mongoose.get('bufferCommands'));
       
       // Force manual connection if needed
       if (mongoose.connection.readyState !== 1) {
@@ -142,9 +141,23 @@ const AuthController = {
         console.log('🔧 Manual connection established');
       }
       
+      // Create User model with explicit bufferCommands: true
+      const UserSchema = new mongoose.Schema({
+        name: { type: String, required: true },
+        email: { type: String, required: true, unique: true },
+        password: { type: String },
+        role: { type: String },
+        registrationMethod: { type: String }
+      }, { 
+        timestamps: true,
+        bufferCommands: true 
+      });
+      
+      const UserModel = mongoose.models.users || mongoose.model('users', UserSchema);
+      
       // check email registered
       console.log('🔍 Attempting to find user...');
-      const findUser = await User.findOne({ email }).exec();
+      const findUser = await UserModel.findOne({ email }).exec();
       console.log('🔍 User query result:', findUser ? 'Found' : 'Not found');
 
       if (!findUser) {
